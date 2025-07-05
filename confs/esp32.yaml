@@ -8,11 +8,12 @@ esp32:
   board: esp32dev
   framework:
     type: esp-idf
-    version: recommended
+    version: 4.4.8
+    #version: recommended
     # Custom sdkconfig options
+    platform_version: 5.4.0
     sdkconfig_options:
       COMPILER_OPTIMIZATION_SIZE: y
-      GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"
 
 uart:
   id: uart_ecodan
