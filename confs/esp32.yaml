@@ -7,13 +7,14 @@ esphome:
 esp32:
   board: esp32dev
   framework:
-    type: esp-idf
+    type: arduino
+    #type: esp-idf
     #version: 4.4.8
-    version: recommended
+    #version: recommended
     # Custom sdkconfig options
     #platform_version: 5.4.0
-    sdkconfig_options:
-      COMPILER_OPTIMIZATION_SIZE: y
+    #sdkconfig_options:
+    #  COMPILER_OPTIMIZATION_SIZE: y
 
 uart:
   id: uart_ecodan
