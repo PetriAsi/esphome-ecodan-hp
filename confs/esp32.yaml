@@ -8,10 +8,9 @@ esp32:
   board: esp32dev
   framework:
     type: esp-idf
-    #version: 4.4.8
-    #version: recommended
+    version: recommended
     # Custom sdkconfig options
-    #platform_version: 5.4.0
+    platform_version: 5.4.2
     #sdkconfig_options:
     #  COMPILER_OPTIMIZATION_SIZE: y
 
