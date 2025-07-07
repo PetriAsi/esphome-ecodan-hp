@@ -13,8 +13,8 @@ ota:
 
 api:
   reboot_timeout: 0s
-#  encryption:
-#    key: !secret heatpump_encryption_key
+  encryption:
+     key: !secret heatpump_encryption_key
 
 # external_components:
 # - source:
