@@ -125,3 +125,10 @@ substitutions:
   super_heat_temp: Puristuksen ylikuumenemislämpötila
   sub_cool_temp: Alijäähdytyslämpötila
   fan_speed: Puhaltimen nopeus
+# Server control labels
+  server_control_enable_disable: Palvelimen ohjaus - Käytössä/Pois käytöstä
+  server_control_prohibit_dhw: Palvelimen ohjaus - LKV esto
+  server_control_zone1_prohibit_heating: Palvelimen ohjaus - Vyöhyke 1 lämmityksen esto
+  server_control_zone1_prohibit_cooling: Palvelimen ohjaus - Vyöhyke 1 jäähdytyksen esto
+  server_control_zone2_prohibit_heating: Palvelimen ohjaus - Vyöhyke 2 lämmityksen esto
+  server_control_zone2_prohibit_cooling: Palvelimen ohjaus - Vyöhyke 2 jäähdytyksen esto
