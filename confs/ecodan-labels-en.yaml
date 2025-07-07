@@ -127,9 +127,9 @@ substitutions:
   fan_speed: Fan Speed
   
   # Server control labels
-  server_control_enable_disable: Server Control - Enable/Disable
-  server_control_prohibit_dhw: Server Control - Prohibit DHW
-  server_control_zone1_prohibit_heating: Server Control - Zone 1 Prohibit Heating
-  server_control_zone1_prohibit_cooling: Server Control - Zone 1 Prohibit Cooling
-  server_control_zone2_prohibit_heating: Server Control - Zone 2 Prohibit Heating
-  server_control_zone2_prohibit_cooling: Server Control - Zone 2 Prohibit Cooling
+  heatpump_switch_server_control_mode: Server Control - Enable/Disable
+  heatpump_switch_server_control_prohibit_dhw: Server Control - Prohibit DHW
+  heatpump_switch_server_control_prohibit_z1_heating: Server Control - Zone 1 Prohibit Heating
+  heatpump_switch_server_control_prohibit_z1_cooling: Server Control - Zone 1 Prohibit Cooling
+  heatpump_switch_server_control_prohibit_z2_heating: Server Control - Zone 2 Prohibit Heating
+  heatpump_switch_server_control_prohibit_z2_cooling: Server Control - Zone 2 Prohibit Cooling
