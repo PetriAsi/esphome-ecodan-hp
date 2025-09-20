@@ -67,7 +67,7 @@ packages:
             #confs/zone2.yaml,
             #confs/server-control-z2.yaml,
             ## enable label language files
-            confs/ecodan-labels-en.yaml,  # English
+            # confs/ecodan-labels-en.yaml,  # English
             # confs/ecodan-labels-nl.yaml,  # Dutch
             # confs/ecodan-labels-it.yaml,  # Italian
             # confs/ecodan-labels-fr.yaml,  # French
