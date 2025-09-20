@@ -126,11 +126,7 @@ substitutions:
   super_heat_temp: Discharge Superheat Temp
   sub_cool_temp: Subcooling Temp
   fan_speed: Fan Speed
-  
-  # Server control labels
-  heatpump_switch_server_control_mode: Server Control - Enable/Disable
-  heatpump_switch_server_control_prohibit_dhw: Server Control - Prohibit DHW
-  heatpump_switch_server_control_prohibit_z1_heating: Server Control - Zone 1 Prohibit Heating
-  heatpump_switch_server_control_prohibit_z1_cooling: Server Control - Zone 1 Prohibit Cooling
-  heatpump_switch_server_control_prohibit_z2_heating: Server Control - Zone 2 Prohibit Heating
-  heatpump_switch_server_control_prohibit_z2_cooling: Server Control - Zone 2 Prohibit Cooling
+  status_short_cycle_lockout: 'Short-Cycle: Lockout'
+  minimum_compressor_on_time: 'Short-Cycle: Minimum On-Time'
+  lockout_duration: 'Short-Cycle: Lockout Duration (min)'
+  short_cycle_mitigation_button: 'Short-Cycle: Cancel Lockout'
