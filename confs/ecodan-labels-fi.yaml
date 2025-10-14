@@ -158,5 +158,5 @@ substitutions:
   total_increasing_heating_delivered: Kokonaistuotto Lämmitys
   total_increasing_cool_consumed: Kokonaiskulutus Jäähdytys
   total_increasing_cool_delivered: Kokonaistuotto Jäähdytys
-  total_increasing_dhw_consumed: Kokonaiskulutus Lämmin Vesi
-  total_increasing_dhw_delivered: Kokonaistuotto Lämmin Vesi
+  total_increasing_dhw_consumed: Kokonaiskulutus LKV
+  total_increasing_dhw_delivered: Kokonaistuotto LKV

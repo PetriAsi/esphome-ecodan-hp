@@ -75,7 +75,7 @@ packages:
             # confs/ecodan-labels-it.yaml,  # Italian
             # confs/ecodan-labels-fr.yaml,  # French
             # confs/ecodan-labels-de.yaml,  # German
-             confs/ecodan-labels-fi.yaml,  # Finnish
+            confs/ecodan-labels-fi.yaml,  # Finnish
             # confs/ecodan-labels-no.yaml,  # Norwegian
             # confs/ecodan-labels-sv.yaml,  # Swedish
             # confs/ecodan-labels-da.yaml,  # Danish
