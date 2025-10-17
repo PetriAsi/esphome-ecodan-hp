@@ -224,14 +224,18 @@ namespace ecodan
             return std::string(result);
         }
 
-        bool verify_header()
-        {
-            if (buffer_[0] != HEADER_MAGIC_A1 && buffer_[0] != HEADER_MAGIC_A2)
-                return false;
+        bool has_valid_sync_byte() const {
+            return buffer_[0] == HEADER_MAGIC_A1 || buffer_[0] == HEADER_MAGIC_A2;
             // if (buffer_[0] == HEADER_MAGIC_A1 && (buffer_[2] != HEADER_MAGIC_B || buffer_[3] != HEADER_MAGIC_C))
             //     return false;
             // else if (buffer_[0] == HEADER_MAGIC_B && (buffer_[1] != HEADER_MAGIC_D || buffer_[2] != HEADER_MAGIC_D))
             //     return false;
+        }
+
+        bool verify_header()
+        {
+            if (!has_valid_sync_byte())
+                return false;
 
             if (payload_size() > PAYLOAD_SIZE)
                 return false;
@@ -330,7 +334,7 @@ namespace ecodan
             buffer_[writeOffset_] = calculate_checksum();
         }
 
-        uint8_t get_write_offset()
+        uint8_t get_write_offset() const
         {
             return writeOffset_;
         }
@@ -344,6 +348,13 @@ namespace ecodan
                 return true;
             
             return false;
+        }
+
+        bool matches(const uint8_t* pattern, size_t length) const {
+            if (writeOffset_ != length) {
+                return false;
+            }
+            return memcmp(buffer_, pattern, length) == 0;
         }
 
         float get_float24(size_t index)
