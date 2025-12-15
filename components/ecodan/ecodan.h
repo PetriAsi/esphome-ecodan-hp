@@ -4,6 +4,7 @@
 #include <string>
 #include <chrono>
 #include <optional>
+#include <atomic>
 
 #include "esphome.h"
 #include "esphome/core/component.h"
@@ -13,22 +14,28 @@
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/binary_sensor/binary_sensor.h"
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h" 
+#include "freertos/semphr.h"
+
 #include "proto.h"
 #include "status.h"
 
 namespace esphome {
 namespace ecodan 
 {    
-    static constexpr const char *TAG = "ecodan.component";   
+    static constexpr const char *TAG = "ecodan.component";
 
-    enum class ProxyHandshakeState {
-        NOT_COMPLETED,
-        COMPLETED
+    struct QueuedCommand {
+        Message message;
+        int retries = 0;
+        unsigned long last_sent_time = 0; 
     };
 
     class EcodanHeatpump : public PollingComponent {
     public:        
-        EcodanHeatpump() : PollingComponent() {}
+        EcodanHeatpump();
         void setup() override;
         void update() override;
         void loop() override;
@@ -98,7 +105,6 @@ namespace ecodan
     private:
         uart::UARTComponent *uart_ = nullptr;
         uart::UARTComponent *proxy_uart_ = nullptr;
-        ProxyHandshakeState handshake_state_ = ProxyHandshakeState::NOT_COMPLETED;
         uint8_t initialCount = 0;
 
         Status status;
@@ -112,18 +118,22 @@ namespace ecodan
         Status::REQUEST_CODE activeRequestCode = Status::REQUEST_CODE::NONE;
 
         std::optional<CONTROLLER_FLAG> serverControlFlagBeforeLockout = {};
-        std::queue<Message> cmdQueue;
+        std::queue<QueuedCommand> cmdQueue;
 
-        bool serial_rx(uart::UARTComponent *uart, Message& msg);
-        bool serial_tx(uart::UARTComponent *uart, Message& msg);
-        void handle_proxy_handshake(uart::UARTComponent *proxy_uart, uart::UARTComponent *uart);
-        bool needs_proxy_handshake() const { return handshake_state_ == ProxyHandshakeState::NOT_COMPLETED; }
+        std::atomic<std::chrono::steady_clock::time_point> last_proxy_activity_;
+        TaskHandle_t serial_io_task_handle_ = nullptr;
+        QueueHandle_t rx_message_queue_ = nullptr;
+        SemaphoreHandle_t uart_tx_mutex_ = nullptr;
+
+        bool serial_tx(Message& msg);
         
         bool disconnect();
         void reset_connection() {
+            if (proxy_available())
+                return;
+
             connected = false;
             initialCount = 0;
-            handshake_state_ = ProxyHandshakeState::NOT_COMPLETED;
             disconnect();
         };
         bool initialCmdCompleted() { return initialCount == 3; };
@@ -140,6 +150,12 @@ namespace ecodan
 
         void proxy_ping();
         bool proxy_available();
+        void serial_io_task();
+        void process_serial_byte(uint8_t byte, Message& buffer, bool is_proxy_message);
+        
+        static void serial_io_task_trampoline(void *arg) {
+            static_cast<EcodanHeatpump*>(arg)->serial_io_task();
+        };
     };
 
     class EcodanClimate : public climate::Climate, public PollingComponent  {
@@ -169,6 +185,7 @@ namespace ecodan
 
         void refresh();
         void validate_target_temperature();
+        void get_current_limits(float &min_limit, float &max_limit);
         std::chrono::time_point<std::chrono::steady_clock> last_update;
     };    
 

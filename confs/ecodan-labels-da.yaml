@@ -133,29 +133,30 @@ substitutions:
   short_cycle_mitigation_button: 'Kort cyklus: Ophæv lås'
   predictive_short_cycle_control_enabled: 'Kort cyklus: Forebyggende Beskyttelse'
   predictive_short_cycle_high_delta_time_window: 'Kort cyklus: Høj Delta Varighed'
+  predictive_short_cycle_high_delta_threshold: 'Kort cyklus: Tærskel Høj Delta'
+  status_predictive_boost_active: 'Kort cyklus: Forudsigende Boost Aktiv'
   auto_adaptive_control_enabled: 'Auto-Adaptiv: Styring'
-  heating_slope: 'Auto-Adaptiv: Hældning Varmekurve'
-  cooling_slope: 'Auto-Adaptiv: Hældning Kølekurve'
   maximum_heating_flow_temp: 'Auto-Adaptiv: Maks. Fremløbstemperatur Varme'
   minimum_heating_flow_temp: 'Auto-Adaptiv: Min. Fremløbstemperatur Varme'
   minimum_cooling_flow_temp: 'Auto-Adaptiv: Min. Fremløbstemperatur Køling'
   cooling_smart_start_temp: 'Auto-Adaptiv: Smart Start Temp Køling'
   temperature_feedback_source: 'Auto-Adaptiv: Kilde til Rumtemperatur'
   temperature_feedback_option_room: 'Rumtermostat'
-  temperature_feedback_option_api: 'Home Assistant / REST API'
+  select_feedback_option_api: 'Home Assistant / REST API'
   heating_system_type: 'Auto-Adaptiv: Varmesystemtype'
   heating_system_type_option_ufh: 'Gulvvarme'
   heating_system_type_option_ufh_rad: 'Gulvvarme + Radiatorer'
   heating_system_type_option_rad: 'Radiatorer'
-  heating_offset_sensor: 'Auto-Adaptiv: Forskydning Varme'
-  cooling_offset_sensor: 'Auto-Adaptiv: Forskydning Køling'
   auto_adaptive_setpoint_bias: 'Auto-Adaptiv: Setpunkt Bias'
-  dynamic_learning_rate_sensor: 'Auto-Adaptiv: Dynamisk Læringsrate'
   temperature_feedback: 'Auto-Adaptiv: Tilbagemelding Nuværende Rumtemperatur'
-  thermostat_overshoot_compensation: 'Auto-Adaptiv: Kompensation for Termostat-overskridelse'
+  defrost_risk_handling_enabled: 'Auto-Adaptiv: Afrimningsreduktion'
   total_increasing_heating_consumed: Total Forbrugt Varme
   total_increasing_heating_delivered: Total Leveret Varme
   total_increasing_cool_consumed: Total Forbrugt Køling
   total_increasing_cool_delivered: Total Leveret Køling
   total_increasing_dhw_consumed: Total Forbrugt Varmt Vand
   total_increasing_dhw_delivered: Total Leveret Varmt Vand
+  pump_speed: 'Pumpehastighed'
+  pump_feedback: 'Pumpeforbrug'
+  pump_feedback_status: 'Status Pumpefeedback'
+  master_thermostat: 'Hovedrumføler'

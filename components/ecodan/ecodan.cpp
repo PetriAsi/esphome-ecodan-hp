@@ -3,8 +3,41 @@
 namespace esphome {
 namespace ecodan 
 { 
+
+    EcodanHeatpump::EcodanHeatpump() : PollingComponent() {
+        // ring buffer for messages from the uart port
+        this->rx_message_queue_ = xQueueCreate(10, sizeof(Message));
+        if (this->rx_message_queue_ == nullptr) {
+            ESP_LOGE(TAG, "Could not create rx_message_queue");
+        }
+
+        // write mutex uart tx
+        this->uart_tx_mutex_ = xSemaphoreCreateMutex();
+        if (this->uart_tx_mutex_ == nullptr) {
+            ESP_LOGE(TAG, "Could not create uart_tx_mutex");
+        }
+    }
+
     void EcodanHeatpump::setup() {
         heatpumpInitialized = initialize();
+        this->last_proxy_activity_ = std::chrono::steady_clock::now();
+
+        BaseType_t task_core_id;
+#if CONFIG_FREERTOS_UNICORE
+        task_core_id = 0;
+        ESP_LOGI(TAG, "Setup: Single Core detected. Serial task pinned to Core 0.");
+#else
+        int main_core_id = xPortGetCoreID();
+        task_core_id = 1 - main_core_id;
+        ESP_LOGI(TAG, "Setup: Dual Core detected. Main running on Core %d. Serial task pinned to Core %d.", main_core_id, task_core_id);
+#endif
+        // background serial io handler
+        xTaskCreatePinnedToCore(
+            serial_io_task_trampoline,
+            "serial_io_task", 4096, this,
+            configMAX_PRIORITIES - 1, &this->serial_io_task_handle_,
+            task_core_id // pin to other core than esphome if available
+        );
     }
 
 
@@ -72,7 +105,7 @@ namespace ecodan
                 proxy_uart_->get_data_bits() != 8 ||
                 proxy_uart_->get_parity() != uart::UART_CONFIG_PARITY_EVEN) {
                 ESP_LOGI(TAG, "Proxy UART not configured for 2400/9600 8E1. This may not work...");
-            }            
+            }
         }
         else if (!is_connected()){
             begin_connect();
@@ -84,70 +117,17 @@ namespace ecodan
     void EcodanHeatpump::loop()
     {
         static auto last_response = std::chrono::steady_clock::now();
-        // a valid handshake is required in proxy before communication
-        if (proxy_uart_ && proxy_available() && needs_proxy_handshake()) {
-            handle_proxy_handshake(proxy_uart_, uart_);
-            return;
-        }
 
-        if (proxy_uart_ && proxy_uart_->available() > 0) {
-            proxy_ping(); 
-            while (proxy_uart_->available() > 0) {
-                uint8_t byte;
-                proxy_uart_->read_byte(&byte);
-                if (uart_)
-                    uart_->write_byte(byte);
-
-                // redo handshake '0x63 0x00' seems to be the failed msg
-                static uint8_t disconnect_buffer[2];
-                disconnect_buffer[0] = disconnect_buffer[1];
-                disconnect_buffer[1] = byte;
-                if (disconnect_buffer[0] == 0x6e && disconnect_buffer[1] == 0x00) {
-                    ESP_LOGW(TAG, "Proxy disconnected, re-initiating handshake...");
-                    reset_connection(); // reset_connection() moet handshake_state_ resetten
-                }
-            }
-        }
-
-        static Message rx_buffer_; 
-
-        // consume all data and forward directly
-        if (uart_ && uart_->available() > 0) {
+        static Message received_message;
+        // Get messages from queue
+        while (xQueueReceive(this->rx_message_queue_, &received_message, (TickType_t)0) == pdTRUE) {
             last_response = std::chrono::steady_clock::now();
-            while (uart_->available() > 0) {
-                uint8_t current_byte;
-                uart_->read_byte(&current_byte);
-
-                // Immediately forward the raw byte to the proxy
-                if (proxy_available())
-                    proxy_uart_->write_byte(current_byte);
-
-                if (rx_buffer_.get_write_offset() == 0 && current_byte != HEADER_MAGIC_A1) 
-                    continue;
-
-                rx_buffer_.append_byte(current_byte);
-
-                // Once the header is complete, verify it.
-                if (rx_buffer_.get_write_offset() == rx_buffer_.header_size() && !rx_buffer_.verify_header()) {
-                    ESP_LOGW(TAG, "Invalid packet header. Discarding message.");
-                    rx_buffer_ = Message();
-                    continue;
-                }
-
-                // Once the full packet is received, verify its checksum.
-                if (rx_buffer_.get_write_offset() == rx_buffer_.size()) {
-                    if (rx_buffer_.verify_checksum()) {
-                        handle_response(rx_buffer_);
-                    } else {
-                        ESP_LOGW(TAG, "Invalid packet checksum. Discarding message.");
-                    }
-                    rx_buffer_ = Message();
-                }
-            }
+            handle_response(received_message);
+            received_message.reset();
         }
         
         auto now = std::chrono::steady_clock::now();
-        if (now - last_response > std::chrono::minutes(2))
+        if (now - last_response > std::chrono::seconds(90))
         {
             last_response = now;
             reset_connection();
@@ -157,23 +137,28 @@ namespace ecodan
 
     void EcodanHeatpump::handle_loop()
     {        
-        if (!is_connected() && uart_ && !uart_->available())
+        if (!is_connected() && uart_)
         {
-            static auto last_attempt = std::chrono::steady_clock::now();
-            auto now = std::chrono::steady_clock::now();
-            if (now - last_attempt > std::chrono::seconds(5))
-            {
-                last_attempt = now;
-                if (!begin_connect())
+            if (proxy_available()) {
+                // re-use previous connect
+                dispatch_next_cmd();
+            }
+            else {
+                static auto last_attempt = std::chrono::steady_clock::now();
+                auto now = std::chrono::steady_clock::now();
+                if (now - last_attempt > std::chrono::seconds(5))
                 {
-                    ESP_LOGI(TAG, "Failed to start heatpump connection proceedure...");
-                }
-            }    
+                    last_attempt = now;
+                    if (!begin_connect())
+                    {
+                        ESP_LOGI(TAG, "Failed to start heatpump connection proceedure...");
+                    }
+                }    
+            }
         }
         else if (is_connected())
         {
             dispatch_next_cmd();
-
             if (!dispatch_next_status_cmd())
             {
                 ESP_LOGI(TAG, "Failed to begin heatpump status update!");

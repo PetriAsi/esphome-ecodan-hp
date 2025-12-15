@@ -102,6 +102,8 @@ namespace ecodan
                 status.ControllerDateTime.tm_hour = res[4];
                 status.ControllerDateTime.tm_min = res[5];
                 status.ControllerDateTime.tm_sec = res[6];                    
+                status.ControllerDateTime.tm_isdst = -1; 
+                mktime(&status.ControllerDateTime);
 
                 char firmware[6];
                 snprintf(firmware, 6, "%02X.%02X", res[7], res[8]);
@@ -109,6 +111,8 @@ namespace ecodan
             }
             break;               
         case GetType::DEFROST_STATE:
+            status.MasterZone1 = res[1];
+            status.MasterZone2 = res[2];
             status.DefrostActive = res[3] != 0;
             publish_state("status_defrost", status.DefrostActive);
             break;
@@ -213,10 +217,21 @@ namespace ecodan
             break;
         case GetType::TEMPERATURE_STATE_D:
             status.MixingTankTemperature = res.get_float16(1);
-            status.HpRefrigerantCondensingTemperature = res.get_float16_signed(4);
+            if (res[4] == 0x0f && res[5] == 0xd9) {
+                // stuck at 40.57 -> read condensing temp at byte 6
+                status.HpRefrigerantCondensingTemperature = res.get_float8_v3(6);
+            }
+            else {
+                status.HpRefrigerantCondensingTemperature = res.get_float16_signed(4);
+            }
             publish_state("mixing_tank_temp", status.MixingTankTemperature);
             publish_state("hp_refrigerant_condensing_temp", status.HpRefrigerantCondensingTemperature);
-            //ESP_LOGE(TAG, "0x0f offset 6: \t%f (v1), \t%f (v2), \t%f (v3)", res.get_float8(6), res.get_float8_v2(6), res.get_float8_v3(6));
+            // static float last_temp = 0.0f;
+            // if (last_temp != status.HpRefrigerantCondensingTemperature) {
+            //     last_temp = status.HpRefrigerantCondensingTemperature;
+            //     ESP_LOGW(TAG, "0x0f offset 4+5: \t0x%02X = %f, offset 6: \t%f", res[6], res.get_float16_signed(4), res.get_float8_v3(6));
+            // }
+            //ESP_LOGW(TAG, res.debug_dump_packet().c_str());
  
             // detect if unit reports extended 0x0f messages
             if (!status.ReportsExtendedOutdoorUnitThermistors) {
@@ -271,6 +286,7 @@ namespace ecodan
             //ESP_LOGI(TAG, res.debug_dump_packet().c_str());
             break;
         case GetType::PUMP_STATUS:
+        {
             // byte 1 = pump running on/off
             // byte 4 = pump 2
             // byte 5 = pump 3
@@ -279,12 +295,38 @@ namespace ecodan
             // byte 10 - Mixing valve step         
             // byte 11 - Mixing valve status
             status.WaterPumpActive = res[1] != 0;
+            status.PumpPWM = res[2];
+            status.PumpFeedback = res[3];
             status.ThreeWayValveActive = res[6] != 0;
             status.WaterPump2Active = res[4] != 0;
             status.ThreeWayValve2Active = res[7] != 0;         
             status.WaterPump3Active = res[5] != 0;       
             status.MixingValveStep = res[10];   
             status.MixingValveStatus = res[11];   
+            float mapped_pump_speed = 0.0f;
+            switch (status.PumpPWM) {
+                case 52:
+                    mapped_pump_speed = 1;
+                    break;
+                case 41:
+                    mapped_pump_speed = 2;
+                    break;
+                case 31:
+                    mapped_pump_speed = 3;
+                    break;
+                case 20:
+                    mapped_pump_speed = 4;
+                    break;
+                case 0:
+                    mapped_pump_speed = 5;
+                    break;
+                case 100:
+                default:
+                    mapped_pump_speed = 0;
+                break;
+            }
+            publish_state("pump_speed", static_cast<float>(mapped_pump_speed));
+            publish_state("pump_feedback", static_cast<float>((status.PumpFeedback == 100 | status.PumpFeedback == 255) ? 0 : status.PumpFeedback));
             publish_state("status_water_pump", status.WaterPumpActive);
             publish_state("status_three_way_valve", status.ThreeWayValveActive);
             publish_state("status_water_pump_2", status.WaterPump2Active);
@@ -293,6 +335,7 @@ namespace ecodan
             publish_state("status_mixing_valve", static_cast<float>(status.MixingValveStatus));
             publish_state("mixing_valve_step", static_cast<float>(status.MixingValveStep));
             //ESP_LOGI(TAG, res.debug_dump_packet().c_str());
+        }
             break;              
         case GetType::FLOW_RATE:
             // booster = 2, 
@@ -322,7 +365,9 @@ namespace ecodan
 
             publish_state("status_power", status.Power == Status::PowerMode::ON);
             publish_state("status_dhw_eco", status.HotWaterMode == Status::DhwMode::ECO);
-            //publish_state("status_operation", static_cast<float>(status.Operation));
+            publish_state("status_operation", static_cast<float>(status.Operation));
+            // publish numeric operation mode for callbacks
+            publish_state("operation_mode", static_cast<float>(status.Operation));
             publish_state("status_heating_cooling", static_cast<float>(status.HeatingCoolingMode));
             publish_state("status_heating_cooling_z2", static_cast<float>(status.HeatingCoolingModeZone2));
 
