@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esphome.h"
+#include "esphome/components/thermostat/thermostat_climate.h"
 
 // forward declare EcodanHeatpump
 namespace esphome
@@ -26,6 +27,11 @@ namespace esphome
         SINGLE = 0
     };
 
+    struct FlowLimits {
+      float min;
+      float max;
+    };
+
     struct OptimizerState
     {
       esphome::ecodan::EcodanHeatpump *ecodan_instance;
@@ -47,8 +53,8 @@ namespace esphome
   
       esphome::sensor::Sensor *daily_heating_produced;
       esphome::sensor::Sensor *daily_heating_consumed;
-      esphome::number::Number *solver_kwh_meter_feedback;
 
+      esphome::number::Number *solver_kwh_meter_feedback;
       esphome::select::Select *heating_system_type;
       esphome::select::Select *temperature_feedback_source;
       esphome::select::Select *lockout_duration;
@@ -67,13 +73,14 @@ namespace esphome
       esphome::number::Number *predictive_short_cycle_high_delta_time_window;
       esphome::number::Number *predictive_short_cycle_high_delta_threshold;
 
-      // stats vars
+      esphome::thermostat::ThermostatClimate *asgard_vt_z1;
+      esphome::thermostat::ThermostatClimate *asgard_vt_z2;
+
+      // stats vars calculated daily
       float &learned_heat_loss_global;
       float &learned_base_cop_global;
       float &learned_thermal_output_global;
       float &learned_elec_power_global;
-
-      float &daily_runtime_global; 
 
       uint32_t &lockout_expiration_timestamp;
     };
@@ -88,10 +95,17 @@ namespace esphome
       float dhw_old_z1_setpoint_ = NAN;
       float dhw_old_z2_setpoint_ = NAN;
 
-      uint32_t predictive_delta_start_time_ = 0;
+      // predictive prevention restore points
+      float pcp_old_z1_setpoint_ = NAN;
+      float pcp_old_z2_setpoint_ = NAN;
+      // need to store offset set by prevention events
+      float pcp_adjustment_z1_ = 0.0f;
+      float pcp_adjustment_z2_ = 0.0f;
+
+      uint32_t predictive_delta_start_time_z1_ = 0;
+      uint32_t predictive_delta_start_time_z2_ = 0;
       uint32_t compressor_start_time_ = 0;
       uint32_t last_defrost_time_ = 0;
-      float predictive_short_cycle_total_adjusted_ = 0.0f;
 
       // save last callback state, to only invoke callback on actual change
       float last_hp_feed_temp_ = NAN;
@@ -104,6 +118,7 @@ namespace esphome
       // cast to bool
       float last_defrost_status_ = 0;
       float last_compressor_status_ = 0;
+      float locked_outside_temp_ = NAN;
 
       // smart boost vars
       uint32_t stagnation_start_time_ = 0;
@@ -114,6 +129,8 @@ namespace esphome
       float daily_temp_sum_ = 0.0f;
       int daily_temp_count_ = 0;
       int last_processed_day_ = -1;
+
+      float daily_runtime_global = 0; 
       // helpers to track runtime
       uint32_t last_check_ms_ = 0;
 
@@ -143,8 +160,10 @@ namespace esphome
       bool is_post_dhw_window(const ecodan::Status &status);
       bool is_heating_active(const ecodan::Status &status);
       float clamp_flow_temp(float calculated_flow, float min_temp, float max_temp);
-      float enforce_step_down(float actual_flow_temp, float calculated_flow);
+      float enforce_step_down(const ecodan::Status &status, float actual_flow_temp, float calculated_flow);
       bool set_flow_temp(float flow, OptimizerZone zone);
+
+      void predictive_short_cycle_check_for_zone_(const ecodan::Status &status, OptimizerZone zone);
 
       // smart boost
       float calculate_smart_boost(int profile, float error);
@@ -172,6 +191,12 @@ namespace esphome
       void update_boost_sensor();
 
       void update_heat_model();
+      float get_room_current_temp(OptimizerZone zone);
+      float get_room_target_temp(OptimizerZone zone);
+      float get_feed_temp(OptimizerZone zone);
+      float get_return_temp(OptimizerZone zone);
+      float get_flow_setpoint(OptimizerZone zone);
+      FlowLimits get_flow_limits(OptimizerZone zone);
     };
 
     // dummy, can remain empty

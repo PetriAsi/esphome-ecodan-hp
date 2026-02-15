@@ -2,6 +2,7 @@ number:
   - platform: template
     id: asgard_vt_input_${zone_identifier}
     name: "Virtual Thermostat Input ${zone_identifier}" 
+    device_class: temperature
     unit_of_measurement: "°C"
     optimistic: true
     restore_value: true
@@ -11,16 +12,53 @@ number:
     step: 0.1
     on_value:
       then:
-        - component.update: asgard_vt_feedback_${zone_identifier}
+        - if:
+            condition:
+              lambda: |-
+                auto idx = id(asgard_vt_temp_sensor_source_${zone_identifier}).active_index().value_or(0);
+                return idx == 0;
+            then:
+              - component.update: asgard_vt_feedback_${zone_identifier}
 
 sensor:
   - platform: template
     id: asgard_vt_feedback_${zone_identifier}
     internal: true 
     unit_of_measurement: "°C"
-    lambda: |-
-      return id(asgard_vt_input_${zone_identifier}).state;
     update_interval: 60s
+    lambda: |-
+      auto idx = id(asgard_vt_temp_sensor_source_${zone_identifier}).active_index().value_or(0);
+      
+      if (idx == 0) {
+        return id(asgard_vt_input_${zone_identifier}).state;
+      }
+      
+      // Index 1: OneWire Sensor
+      if (idx == 1) {
+        return id(gl_temp_${zone_identifier});
+      }
+
+      // Index 2: MRC
+      if (idx == 2) {
+        auto& status = id(ecodan_instance).get_status();
+        return "${zone_identifier}" == "z1" ? status.Zone1RoomTemperature : status.Zone2RoomTemperature;
+      }
+      return NAN;
+
+select:
+  - platform: template
+    id: asgard_vt_temp_sensor_source_${zone_identifier}
+    name: "${asgard_vt_temp_sensor_source} ${zone_identifier}"
+    optimistic: true
+    restore_value: true
+    options:
+      - "Virtual Thermostat Input ${zone_identifier}" 
+      - "DS18x20 ${zone_identifier}"
+      - "MRC"
+    initial_option: "Virtual Thermostat Input ${zone_identifier}" 
+    set_action:
+      then:
+        - component.update: asgard_vt_feedback_${zone_identifier}
 
 switch:
   - platform: gpio
@@ -60,9 +98,10 @@ switch:
       - switch.turn_off: asgard_relay_${zone_identifier}
 
 climate:
-  - platform: thermostat
+  - platform: ecodan
     name: "Virtual Thermostat ${zone_identifier}"
     id: virtual_climate_${zone_identifier}
+    variant: virtual
     sensor: asgard_vt_feedback_${zone_identifier}
     
     visual:
@@ -70,9 +109,9 @@ climate:
       max_temperature: 30
       temperature_step: 0.1
     
-    heat_deadband: 0.5
+    heat_deadband: 0
     heat_overrun: 0.5
-    cool_deadband: 0.5
+    cool_deadband: 0
     cool_overrun: 0.5
     
     heat_action:
