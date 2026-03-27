@@ -1,5 +1,4 @@
 #include "optimizer.h"
-#include "esphome/components/ecodan/ecodan.h"
 
 using std::isnan;
 
@@ -18,16 +17,10 @@ namespace esphome
 
         bool Optimizer::is_system_hands_off(const ecodan::Status &status)
         {
-            if (status.DefrostActive)
-            {
-                //ESP_LOGD(OPTIMIZER_TAG, "System is Defrosting");
-                return true;
-            }
-            if (this->state_.status_short_cycle_lockout->state)
-            {
-                //ESP_LOGD(OPTIMIZER_TAG, "System is in Lockout");
-                return true;
-            }
+            if (status.DefrostActive) return true;
+
+            if (this->state_.status_short_cycle_lockout != nullptr && 
+                this->state_.status_short_cycle_lockout->state) return true;
             
             if (status.Operation == esphome::ecodan::Status::OperationMode::DHW_ON ||
                 status.Operation == esphome::ecodan::Status::OperationMode::FROST_PROTECT ||
@@ -94,7 +87,9 @@ namespace esphome
 
         float Optimizer::get_room_current_temp(OptimizerZone zone) {
             auto &status = this->state_.ecodan_instance->get_status();
-            auto temp_feedback_source = this->state_.temperature_feedback_source->active_index().value_or(0);
+
+            auto temp_feedback_source =  (zone == OptimizerZone::ZONE_2) ? this->state_.temperature_feedback_source_z2->active_index().value_or(0)
+                : this->state_.temperature_feedback_source_z1->active_index().value_or(0);
 
             auto current_temp = NAN;
 
@@ -120,7 +115,9 @@ namespace esphome
 
         float Optimizer::get_room_target_temp(OptimizerZone zone) {
             auto &status = this->state_.ecodan_instance->get_status();
-            auto temp_feedback_source = this->state_.temperature_feedback_source->active_index().value_or(0);
+            
+            auto temp_feedback_source =  (zone == OptimizerZone::ZONE_2) ? this->state_.temperature_feedback_source_z2->active_index().value_or(0)
+                : this->state_.temperature_feedback_source_z1->active_index().value_or(0);
 
             auto target_temp = NAN;
 

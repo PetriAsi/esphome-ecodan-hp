@@ -1,5 +1,4 @@
 #include "optimizer.h"
-#include "esphome/components/ecodan/ecodan.h"
 
 using std::isnan;
 
@@ -11,8 +10,8 @@ namespace esphome
         // callbacks to monitor step down, need to keep within 1.0C else compressor will halt
         void Optimizer::on_feed_temp_change(float actual_flow_temp, OptimizerZone zone) {            
             if (std::isnan(actual_flow_temp) 
-                || this->state_.status_short_cycle_lockout->state
-                || !this->state_.auto_adaptive_control_enabled->state) {
+                || (this->state_.status_short_cycle_lockout != nullptr && this->state_.status_short_cycle_lockout->state)
+                || (this->state_.auto_adaptive_control_enabled != nullptr && !this->state_.auto_adaptive_control_enabled->state)) {
                 return;
             }
 
@@ -231,15 +230,30 @@ namespace esphome
             if (!x_previous && x)
             {
                 auto &status = this->state_.ecodan_instance->get_status();
-                if (!std::isnan(status.OutsideTemperature)) {
-                    this->locked_outside_temp_ = status.OutsideTemperature;
-                    ESP_LOGI(OPTIMIZER_TAG, "Defrost started. Locking outside temp at %.1f°C for adaptive calculations.", this->locked_outside_temp_);
-                }
+                DefrostState state_before_defrost{};
+
+                if (!std::isnan(status.OutsideTemperature))
+                    state_before_defrost.locked_outside_temp_ = status.OutsideTemperature;
+
+                if (!std::isnan(status.HpReturnTemperature))
+                    state_before_defrost.locked_return_temp_ = status.HpReturnTemperature;
+
+                if (!std::isnan(status.Z1ReturnTemperature))
+                    state_before_defrost.locked_return_temp_z1_ = status.Z1ReturnTemperature;
+
+                if (!std::isnan(status.Z2ReturnTemperature))
+                    state_before_defrost.locked_return_temp_z2_ = status.Z2ReturnTemperature;
+
+                this->state_before_defrost_ = state_before_defrost;
+                ESP_LOGD(OPTIMIZER_TAG, "Defrost started. Locking states: outside temp: %.1f, hp return: %.1f, z1 return: %.1f, z2 return: %.1f for adaptive calculations.", 
+                    state_before_defrost.locked_outside_temp_, state_before_defrost.locked_return_temp_, state_before_defrost.locked_return_temp_z1_, state_before_defrost.locked_return_temp_z2_);
+                
             }
             // Defrost STOP
             else if (x_previous && !x)
             {
-                ESP_LOGD(OPTIMIZER_TAG, "Defrost stop: triggering auto-adaptive loop.");
+                this->last_defrost_time_ = millis();
+                ESP_LOGD(OPTIMIZER_TAG, "Defrost stop: triggering auto-adaptive loop (Also updating last_defrost timestamp).");
                 this->run_auto_adaptive_loop();
             }
         }
@@ -261,7 +275,6 @@ namespace esphome
                 {
                     ESP_LOGI(OPTIMIZER_CYCLE_TAG, "Compressor START detected");
                     this->compressor_start_time_ = millis();
-                    this->last_check_ms_ = this->compressor_start_time_;
                 }
                 if (this->state_.auto_adaptive_control_enabled->state)
                 {

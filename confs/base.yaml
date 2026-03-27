@@ -170,6 +170,7 @@ text_sensor:
   - platform: template
     id: status_operation
     name: ${status_operation}
+    update_interval: never
     lambda: |-
       auto value = id(ecodan_instance).get_status().Operation;
       switch (value)
@@ -329,6 +330,9 @@ sensor:
     operation_mode:
       id: operation_mode
       internal: true
+      on_value:
+        then:
+          - component.update: status_operation
     controller_version:
       id: controller_version
       internal: true
@@ -354,9 +358,15 @@ sensor:
     hp_feed_temp:
       id: hp_feed_temp
       name: ${hp_feed_temp}
+      on_value:
+        then:
+          - component.update: hp_delta_t
     hp_return_temp:
       id: hp_return_temp
       name: ${hp_return_temp}
+      on_value:
+        then:
+          - component.update: hp_delta_t
     hp_refrigerant_temp:
       id: hp_refrigerant_temp
       name: ${hp_refrigerant_temp}
@@ -430,9 +440,14 @@ sensor:
           if (controller_day != last_day_of_year) {
             last_day_of_year = controller_day;
             partial_sum = 0.0f;
+            last_value = x;
+            return partial_sum;
           }
 
-          partial_sum += x >= last_value ? (x - last_value) : (65536 + x - last_value);
+          if (x >= last_value) {
+            partial_sum += (x - last_value);
+          }
+          // roll overs are auto handled by total_increasing
           last_value = x;
           return partial_sum;
   
@@ -481,6 +496,18 @@ sensor:
           last_input_value = status.EnergyConsumedIncreasing;
           return cop;
       }
+
+  - platform: template
+    id: hp_delta_t
+    name: "Delta T"
+    lambda: |-
+      if (isnan(id(hp_feed_temp).state) || isnan(id(hp_return_temp).state)) return NAN;
+      return id(hp_feed_temp).state - id(hp_return_temp).state;
+    accuracy_decimals: 1
+    unit_of_measurement: "°C"
+    state_class: measurement
+    device_class: temperature
+    update_interval: never
 
   - platform: uptime
     name: ${uptime}
@@ -646,3 +673,5 @@ binary_sensor:
       id: status_zone2_enabled
       internal: true
       name: zone 2 enabled
+
+<<: !include stats.yaml

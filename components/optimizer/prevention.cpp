@@ -1,5 +1,4 @@
 #include "optimizer.h"
-#include "esphome/components/ecodan/ecodan.h"
 
 using std::isnan;
 
@@ -11,14 +10,14 @@ namespace esphome
 
         bool Optimizer::get_predictive_boost_state()
         {
-            return (!isnan(this->pcp_old_z1_setpoint_) && this->pcp_old_z1_setpoint_ > 0.0f) 
-                || (!isnan(this->pcp_old_z2_setpoint_) && this->pcp_old_z2_setpoint_ > 0.0f);
+            return (!isnan(this->pcp_adjustment_z1_) && this->pcp_adjustment_z1_ > 0.0f) 
+                || (!isnan(this->pcp_adjustment_z2_) && this->pcp_adjustment_z2_ > 0.0f);
         }
 
         void Optimizer::reset_predictive_boost()
         {
-            this->pcp_old_z1_setpoint_ = NAN;
-            this->pcp_old_z2_setpoint_ = NAN;
+            this->pcp_adjustment_z1_ = 0.0f;
+            this->pcp_adjustment_z2_ = 0.0f;
             this->update_boost_sensor();
         }
 
@@ -109,18 +108,6 @@ namespace esphome
             
             auto &status = this->state_.ecodan_instance->get_status();
 
-            static bool was_defrosting = false;
-            if (status.DefrostActive) 
-            {
-                was_defrosting = true;
-            }
-            else if (was_defrosting) 
-            {
-                ESP_LOGD(OPTIMIZER_CYCLE_TAG, "Defrost cycle finished. Updating last_defrost timestamp");
-                this->last_defrost_time_ = millis();
-                was_defrosting = false;
-            }
-
             auto multizone_status = status.MultiZoneStatus;
             bool is_heating_z1 = status.is_auto_adaptive_heating(esphome::ecodan::Zone::ZONE_1) 
                 || status.is_heating(esphome::ecodan::Zone::ZONE_1)
@@ -157,7 +144,9 @@ namespace esphome
                 this->state_.ecodan_instance->set_controller_mode(esphome::ecodan::CONTROLLER_FLAG::SERVER_CONTROL, false);
             }
             this->state_.lockout_expiration_timestamp = 0;
-            this->state_.status_short_cycle_lockout->publish_state(false);
+            if (this->state_.status_short_cycle_lockout != nullptr) {
+                this->state_.status_short_cycle_lockout->publish_state(false);
+            }
         }
 
         void Optimizer::start_lockout()
@@ -224,7 +213,7 @@ namespace esphome
             }
             else
             {
-                if (!this->state_.status_short_cycle_lockout->state)
+                if (this->state_.status_short_cycle_lockout != nullptr && !this->state_.status_short_cycle_lockout->state)
                 {
                     ESP_LOGI(OPTIMIZER_CYCLE_TAG, "Booted during active lockout. Re-enabling lockout sensor. (Ecodan Time: %u, Expiration: %u)", current_time, expiration);
                     this->state_.status_short_cycle_lockout->publish_state(true);
