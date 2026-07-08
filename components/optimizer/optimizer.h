@@ -43,9 +43,32 @@ namespace esphome
             return locked_return_temp_;
         }
       };
+
+      OptimizerOperationMode to_operation_mode(float val) {
+          if (std::isnan(val)) return OptimizerOperationMode::OFF;
+          
+          int int_val = static_cast<int>(std::round(val));
+          switch (int_val) {
+              case 1:   return OptimizerOperationMode::DHW_ON;
+              case 2:   return OptimizerOperationMode::HEAT_ON;
+              case 3:   return OptimizerOperationMode::COOL_ON;
+              //case 5:   return OptimizerOperationMode::FROST_PROTECT;
+              //case 6:   return OptimizerOperationMode::LEGIONELLA_PREVENTION;
+              case 255: return OptimizerOperationMode::UNAVAILABLE;
+              default:  return OptimizerOperationMode::OFF;
+          }
+      };
+
+      bool is_cooling_mode(const ecodan::Status& status, OptimizerZone zone) {
+        auto ecodan_zone = zone == OptimizerZone::ZONE_1 ? ecodan::Zone::ZONE_1 : ecodan::Zone::ZONE_2;
+        return status.has_cooling() && status.is_auto_adaptive_cooling(ecodan_zone);
+      }
+
       uint32_t compressor_start_time_ = 0;
       uint32_t last_defrost_time_     = 0;
       DefrostState state_before_defrost_;
+
+      int odin_last_executed_dhw_hour_ = -1;
 
       // Callback state (detect change before firing)
       float last_hp_feed_temp_      = NAN;
@@ -73,9 +96,26 @@ namespace esphome
       int      last_processed_day_          = -1;
       int      last_processed_hour_         {-1};
       int      last_pre_hour_triggered_      {-1};
+      float    daily_runtime_cool_          = 0.0f;
+
+      // Strict energy separation buckets
+      float    last_global_prod_            = -1.0f;
+      float    last_global_cons_            = -1.0f;
       float    last_total_heating_produced_ = 0.0f;
       float    last_total_heating_consumed_ = 0.0f;
+      float    last_total_cooling_produced_ = 0.0f;
+      float    last_total_cooling_consumed_ = 0.0f;
+      float    last_total_dhw_produced_     = 0.0f;
+      float    last_total_dhw_consumed_     = 0.0f;
+      float    last_total_all_consumed_     = 0.0f;
+
+      // 10-minute wind-down window: keeps buckets open after compressor stops
+      // to catch delayed meter ticks. Initialised to UINT32_MAX - 700000 so the
+      // window is guaranteed expired at boot regardless of millis() value.
+      bool     last_was_dhw_                = false;
       bool     last_was_heating_            = false;
+      bool     last_was_cooling_            = false;
+      uint32_t last_run_time_               = UINT32_MAX - 700000UL;
 
       // Free cooling window tracking (HP-off period, any time of day)
       // Measures HL×TM product from unregulated cooldown, free of solar/DHW contamination.
@@ -88,9 +128,11 @@ namespace esphome
       
       // ODIN solver data
       std::atomic<bool> odin_fetch_requested_{false};
-      std::vector<float> odin_energy_;
       std::vector<float> odin_production_;
       std::vector<float> odin_solar_forecast_;
+      std::vector<float> odin_operation_mode_;
+      float odin_min_output_{0};
+      float odin_max_output_{0};
 
       int      odin_data_day_   {-1};
       bool     odin_data_ready_ {false};
@@ -104,7 +146,7 @@ namespace esphome
 
       // ── adaptive_loop.cpp ──────────────────────────────────────────────
       HeatingProfile   get_heating_profile_(int type_index);
-      struct SolverResult { float load_ratio; bool heating_off; };
+      struct SolverResult { float load_ratio; bool heatpump_off; OptimizerOperationMode mode{OptimizerOperationMode::UNAVAILABLE}; int current_hour{-1}; };
       DefrostState resolve_defrost_state_();
       SolverResult resolve_solver_result_(float room_target_temp, float current_room_temp);
       float            calculate_heating_flow_(std::size_t zone_i,
@@ -149,8 +191,9 @@ namespace esphome
       bool  is_dhw_active(const ecodan::Status &status);
       bool  is_post_dhw_window(const ecodan::Status &status);
       bool  is_heating_active(const ecodan::Status &status);
+      bool  is_cooling_active(const ecodan::Status &status);
       float clamp_flow_temp(float flow, float min_temp, float max_temp);
-      float enforce_step_down(const ecodan::Status &status, float actual_flow, float calculated_flow);
+      float enforce_step_limit(const ecodan::Status &status, float actual_flow, float calculated_flow, bool is_cooling_mode);
       bool  set_flow_temp(float flow, OptimizerZone zone);
       float round_nearest(float input)      { return round(input * 10.0f) / 10.0f; }
       float round_nearest_half(float input) { return floor(input * 2.0) / 2.0f; }
@@ -189,13 +232,31 @@ namespace esphome
       // Solver / ODIN
       bool aa_enabled() const;
       bool solver_enabled() const;
+      uint8_t get_current_operation_mode();
       float get_current_solar_irradiance();
+      
       float get_heating_produced_kwh() const { return last_total_heating_produced_; }
       float get_heating_consumed_kwh() const { return last_total_heating_consumed_; }
+      float get_cooling_produced_kwh() const { return last_total_cooling_produced_; }
+      float get_cooling_consumed_kwh() const { return last_total_cooling_consumed_; }
+      float get_dhw_produced_kwh() const { return last_total_dhw_produced_; }
+      float get_dhw_consumed_kwh() const { return last_total_dhw_consumed_; }
+      float get_total_consumed_kwh() const { return this->last_total_all_consumed_; }
+
       int  get_current_ecodan_hour();
       int  get_current_ecodan_day();
       bool has_old_odin_data();
-      void store_odin_data(int current_hour, const std::vector<float>& prod, const std::vector<float>& energy, const std::vector<float>& solar);
+      void store_odin_data(int current_hour, float min_output, float max_output, const std::vector<float>& prod, const std::vector<float>& solar, const std::vector<float>& op_mode);
+      // Brings odin_data_day_ in sync with the new day without forcing a new solve 
+      // the existing forecast (from the 23:55 solve) is still valid, only the "is this stale" check
+      // needs to know we're now on the new day.
+      void sync_odin_data_day() {
+          int d = this->get_current_ecodan_day();
+          if (d >= 0 && this->odin_mutex_ != NULL && xSemaphoreTake(this->odin_mutex_, pdMS_TO_TICKS(100)) == pdTRUE) {
+              this->odin_data_day_ = d;
+              xSemaphoreGive(this->odin_mutex_);
+          }
+      }
       bool check_and_clear_odin_fetch_request() {
           return odin_fetch_requested_.exchange(false);
       }

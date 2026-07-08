@@ -24,8 +24,11 @@ namespace esphome
             if (this->state_.ecodan_instance == nullptr) return -1;
             time_t ts = this->state_.ecodan_instance->get_status().timestamp();
             if (ts == -1) return -1;
+            // Ecodan reports local time; timestamp() uses mktime() which interprets
+            // ControllerDateTime as local time → epoch. Use localtime_r to get back
+            // the correct local hour. gmtime_r would give UTC = wrong hour.
             struct tm t;
-            gmtime_r(&ts, &t);
+            localtime_r(&ts, &t);
             return t.tm_hour;
         }
 
@@ -34,7 +37,7 @@ namespace esphome
             time_t ts = this->state_.ecodan_instance->get_status().timestamp();
             if (ts == -1) return -1;
             struct tm t;
-            gmtime_r(&ts, &t);
+            localtime_r(&ts, &t);
             return t.tm_yday;
         }
 
@@ -43,7 +46,7 @@ namespace esphome
           bool has_data = false;
           
           if (xSemaphoreTake(this->odin_mutex_, pdMS_TO_TICKS(10)) == pdTRUE) {
-              has_data = (odin_data_ready_ && odin_energy_.size() == 24);
+              has_data = (odin_data_ready_ && odin_production_.size() == 24);
               xSemaphoreGive(this->odin_mutex_);
           }
           return has_data;
@@ -53,9 +56,9 @@ namespace esphome
             float current_solar = 0.0f;
             int hr = this->get_current_ecodan_hour();
             
-            if (hr >= 0 && hr < 24) {
+            if (hr >= 0 && hr < 48) {
                 if (this->odin_mutex_ != NULL && xSemaphoreTake(this->odin_mutex_, pdMS_TO_TICKS(50)) == pdTRUE) {
-                    if (!this->odin_solar_forecast_.empty() && hr < this->odin_solar_forecast_.size()) {
+                    if (!this->odin_solar_forecast_.empty() && hr < (int)this->odin_solar_forecast_.size()) {
                         current_solar = this->odin_solar_forecast_[hr];
                     }
                     xSemaphoreGive(this->odin_mutex_);
@@ -64,14 +67,25 @@ namespace esphome
             return current_solar;
         }
 
+        // get numeric operating mode for mpc call
+        uint8_t Optimizer::get_current_operation_mode() {
+
+            if (this->state_.ecodan_instance == nullptr) return 0;
+            auto &status = this->state_.ecodan_instance->get_status();
+            
+            return static_cast<uint8_t>(status.Operation);
+        }
+
         // ─────────────────────────────────────────────────────────────────
         // ODIN production store (called from YAML after fetch completes)
         // ─────────────────────────────────────────────────────────────────
 
         void Optimizer::store_odin_data(int current_hour,
+                                        float min_output, 
+                                        float max_output, 
                                         const std::vector<float>& prod,
-                                        const std::vector<float>& energy,
-                                        const std::vector<float>& solar) {
+                                        const std::vector<float>& solar,
+                                        const std::vector<float>& op_mode) {
             if (current_hour == -1) return;
 
             if (this->odin_mutex_ == NULL ||
@@ -80,38 +94,57 @@ namespace esphome
                 return;
             }
 
-            // FIX: Always update the stored day when fresh data arrives!
-            // This prevents the 5-minute loop from incorrectly rejecting fresh hour 0 data.
-            int _day = this->get_current_ecodan_day();
-            if (_day >= 0) {
-                this->odin_data_day_ = _day;
-            }
+            this->odin_min_output_ = min_output;
+            this->odin_max_output_ = max_output;
 
-            // First run or size mismatch — full replace
-            if (!this->odin_data_ready_ || this->odin_production_.size() != 24) {
-                this->odin_production_ = prod;
-                this->odin_energy_     = energy;
-                this->odin_solar_forecast_ = solar;
-                this->odin_production_.resize(24);
-                this->odin_energy_.resize(24);
+            // odin_production_ and odin_operation_mode_ are DP_HOURS=24 (engine only plans today).
+            // odin_solar_forecast_ is kept at 48 — the server passes today+tomorrow solar.
+            bool is_first_run = (!this->odin_data_ready_ || this->odin_production_.size() != 24);
+            if (is_first_run) {
+                this->odin_solar_forecast_.assign(48, 0.0f);
+                this->odin_operation_mode_.assign(24, NAN);
+                this->odin_production_.assign(24, NAN);
                 this->odin_data_ready_ = true;
             }
 
-            // Partial update: overwrite current hour onward
-            if (current_hour >= 0 && current_hour < 24) {
-                for (int i = current_hour; i < 24; i++) {
-                    if (i < prod.size() && i < energy.size()) {
-                        this->odin_production_[i] = prod[i];
-                        this->odin_energy_[i]     = energy[i];
-                    } else {
-                        ESP_LOGW(OPTIMIZER_TAG, "ODIN payload shorter than expected, stopping partial update at hour %d", i);
-                        break; 
-                    }
+            int first_update = is_first_run ? current_hour : current_hour + 1;
+
+            // Midnight-wrap: solve ran at hour 23, first_update==24 means the new data
+            // is for tomorrow (slots 24-47 in the engine's 48h output arrays).
+            // We also advance odin_data_day_ to tomorrow so the day-staleness check in
+            // resolve_solver_result_() does not immediately invalidate the data at 00:00.
+            bool midnight_wrap = (first_update == 24);
+
+            int _day = this->get_current_ecodan_day();
+            if (_day >= 0) {
+                // If wrapping into the next day, register tomorrow's yday so that the
+                // data stays valid when the clock ticks past midnight.
+                this->odin_data_day_ = midnight_wrap ? ((_day + 1) % 365) : _day;
+            }
+
+            // odin_production_/odin_operation_mode_ are a 24h "today" window, always
+            // indexed 0-23 regardless of calendar day.
+            // On midnight-wrap the engine's prod/op_mode slots for tomorrow start at
+            // index 24, so apply a source offset of 24 when reading from those arrays.
+            int prod_first_update = midnight_wrap ? 0 : first_update;
+            int prod_src_offset   = midnight_wrap ? 24 : 0;
+            if (prod_first_update >= 0 && prod_first_update < 24) {
+                for (int i = prod_first_update; i < 24; i++) {
+                    int src = i + prod_src_offset;
+                    if (src < (int)prod.size())    this->odin_production_[i]     = prod[src];
+                    if (src < (int)op_mode.size()) this->odin_operation_mode_[i] = op_mode[src];
+                }
+            }
+
+            if (first_update >= 0 && first_update < 48) {
+                for (int i = first_update; i < 48; i++) {
+                    if (i < (int)solar.size())   this->odin_solar_forecast_[i] = solar[i];
                 }
             }
 
             xSemaphoreGive(this->odin_mutex_);
-            ESP_LOGI(OPTIMIZER_TAG, "ODIN production targets loaded. current_hour=%d", current_hour);
+            ESP_LOGI(OPTIMIZER_TAG, "ODIN production targets loaded (48h). current_hour=%d midnight_wrap=%d data_day=%d",
+                     current_hour, (int)midnight_wrap, this->odin_data_day_);
         }
 
         // ─────────────────────────────────────────────────────────────────

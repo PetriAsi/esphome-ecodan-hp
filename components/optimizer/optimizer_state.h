@@ -27,6 +27,17 @@ namespace esphome
         SINGLE = 0
     };
 
+    enum class OptimizerOperationMode : uint8_t
+    {
+        UNAVAILABLE = 255,
+        OFF = 0,
+        DHW_ON = 1,
+        HEAT_ON = 2, // Heating
+        COOL_ON = 3, // Cooling
+        FROST_PROTECT = 5,
+        LEGIONELLA_PREVENTION = 6
+    }; 
+
     struct FlowLimits {
         float min;
         float max;
@@ -45,15 +56,17 @@ namespace esphome
     {
         esphome::ecodan::EcodanHeatpump *ecodan_instance;
 
-        esphome::switch_::Switch *auto_adaptive_control_enabled;
-        esphome::switch_::Switch *predictive_short_cycle_control_enabled;
-        esphome::switch_::Switch *defrost_risk_handling_enabled;
-        esphome::switch_::Switch *smart_boost_enabled;
-        esphome::switch_::Switch *sw_use_solver;
+        esphome::switch_::Switch *auto_adaptive_control_enabled{nullptr};
+        esphome::switch_::Switch *predictive_short_cycle_control_enabled{nullptr};
+        esphome::switch_::Switch *defrost_risk_handling_enabled{nullptr};
+        esphome::switch_::Switch *smart_boost_enabled{nullptr};
+        esphome::switch_::Switch *sw_use_solver{nullptr};
         esphome::switch_::Switch *relay_switch_z1{nullptr};
         esphome::switch_::Switch *relay_switch_z2{nullptr};
         esphome::switch_::Switch *sw_odin_override_z1{nullptr};
         esphome::switch_::Switch *sw_odin_override_z2{nullptr};
+        esphome::switch_::Switch *sw_force_dhw{nullptr};
+        esphome::switch_::Switch *sw_regular_dhw{nullptr};
 
         esphome::binary_sensor::BinarySensor *status_short_cycle_lockout;
         esphome::binary_sensor::BinarySensor *status_predictive_boost_active;
@@ -68,6 +81,10 @@ namespace esphome
         esphome::sensor::Sensor *daily_heating_produced;
         esphome::sensor::Sensor *daily_heating_consumed;
 
+        //Daily Sensor Fallbacks FTC5/FTC4 - Consumption
+        esphome::sensor::Sensor *ftc_heating_consumed{nullptr};
+        esphome::sensor::Sensor *ftc_cooling_consumed{nullptr};
+
         esphome::number::Number *solver_kwh_meter_feedback;
         esphome::number::Number *auto_adaptive_setpoint_bias;
         esphome::number::Number *temperature_feedback_z1;
@@ -76,7 +93,8 @@ namespace esphome
         esphome::number::Number *minimum_heating_flow_temp;
         esphome::number::Number *maximum_heating_flow_temp_z2;
         esphome::number::Number *minimum_heating_flow_temp_z2;
-        esphome::number::Number *minimum_cooling_flow_temp;
+        esphome::number::Number *minimum_cooling_flow_temp_z1;
+        esphome::number::Number *minimum_cooling_flow_temp_z2;
         esphome::number::Number *cooling_smart_start_temp;
         esphome::number::Number *minimum_compressor_on_time;
         esphome::number::Number *predictive_short_cycle_high_delta_time_window;
@@ -87,17 +105,22 @@ namespace esphome
         esphome::number::Number *num_raw_avg_outside_temp;
         esphome::number::Number *num_raw_avg_room_temp;
         esphome::number::Number *num_raw_delta_room_temp;
-        esphome::number::Number *num_raw_max_output;
         esphome::number::Number *num_raw_hl_tm_product;  // heat_loss × thermal_mass from night cooling
         esphome::number::Number *num_raw_solar_factor;
         esphome::number::Number *num_battery_soc_kwh;
         esphome::number::Number *num_battery_max_discharge_kw;
+        // track cooling stats
+        esphome::number::Number *num_raw_cool_produced{nullptr};
+        esphome::number::Number *num_raw_cool_elec_consumed{nullptr};
+        esphome::number::Number *num_raw_cool_runtime_hours{nullptr};
+        esphome::number::Number *num_raw_cool_avg_outside_temp{nullptr};
 
         esphome::select::Select *heating_system_type;
         esphome::select::Select *temperature_feedback_source_z1;
         esphome::select::Select *temperature_feedback_source_z2;
         esphome::select::Select *lockout_duration;
         esphome::select::Select *solver_kwh_meter_feedback_source;
+        esphome::select::Select *solver_dhw_mode{nullptr};
 
         esphome::thermostat::ThermostatClimate *asgard_vt_z1;
         esphome::thermostat::ThermostatClimate *asgard_vt_z2;

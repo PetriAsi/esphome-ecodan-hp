@@ -23,10 +23,9 @@ namespace esphome
                 this->state_.status_short_cycle_lockout->state) return true;
             
             if (status.Operation == esphome::ecodan::Status::OperationMode::DHW_ON ||
-                status.Operation == esphome::ecodan::Status::OperationMode::FROST_PROTECT ||
                 status.Operation == esphome::ecodan::Status::OperationMode::LEGIONELLA_PREVENTION)
             {
-                //ESP_LOGD(OPTIMIZER_TAG, "System is busy (DHW, Frost, etc.)");
+                //ESP_LOGD(OPTIMIZER_TAG, "System is busy (DHW, etc.)");
                 return true;
             }
             return false;
@@ -43,6 +42,10 @@ namespace esphome
         
         bool Optimizer::is_heating_active(const ecodan::Status &status) {
             return status.Operation == esphome::ecodan::Status::OperationMode::HEAT_ON;
+        }
+
+        bool Optimizer::is_cooling_active(const ecodan::Status &status) {
+            return status.Operation == esphome::ecodan::Status::OperationMode::COOL_ON;
         }
 
         float Optimizer::clamp_flow_temp(float calculated_flow, float min_temp, float max_temp)
@@ -88,8 +91,11 @@ namespace esphome
         float Optimizer::get_room_current_temp(OptimizerZone zone) {
             auto &status = this->state_.ecodan_instance->get_status();
 
-            auto temp_feedback_source =  (zone == OptimizerZone::ZONE_2) ? this->state_.temperature_feedback_source_z2->active_index().value_or(0)
-                : this->state_.temperature_feedback_source_z1->active_index().value_or(0);
+            auto *src_cur = (zone == OptimizerZone::ZONE_2)
+                ? this->state_.temperature_feedback_source_z2
+                : this->state_.temperature_feedback_source_z1;
+            auto temp_feedback_source = (src_cur != nullptr && src_cur->has_state())
+                ? src_cur->active_index().value_or(0) : 0;
 
             auto current_temp = NAN;
 
@@ -116,8 +122,11 @@ namespace esphome
         float Optimizer::get_room_target_temp(OptimizerZone zone) {
             auto &status = this->state_.ecodan_instance->get_status();
             
-            auto temp_feedback_source =  (zone == OptimizerZone::ZONE_2) ? this->state_.temperature_feedback_source_z2->active_index().value_or(0)
-                : this->state_.temperature_feedback_source_z1->active_index().value_or(0);
+            auto *src_tgt = (zone == OptimizerZone::ZONE_2)
+                ? this->state_.temperature_feedback_source_z2
+                : this->state_.temperature_feedback_source_z1;
+            auto temp_feedback_source = (src_tgt != nullptr && src_tgt->has_state())
+                ? src_tgt->active_index().value_or(0) : 0;
 
             auto target_temp = NAN;
 
@@ -159,5 +168,37 @@ namespace esphome
             return {min_flow, max_flow};
         }
 
+        float Optimizer::enforce_step_limit(const ecodan::Status &status, float actual_flow_temp, float calculated_flow, bool is_cooling_mode) 
+        {
+            const float MAX_FEED_STEP_CHANGE = 1.0f;
+            const float MAX_FEED_STEP_ADJUSTMENT = 0.5f;
+
+            if (is_cooling_mode) 
+            {
+                if ((calculated_flow - actual_flow_temp) > MAX_FEED_STEP_CHANGE)
+                {
+                    float adjusted_target = actual_flow_temp + MAX_FEED_STEP_ADJUSTMENT;
+                    
+                    ESP_LOGW(OPTIMIZER_TAG, "Cooling flow adjust: %.2f°C to prevent compressor stop! (setpoint: %.2f°C is %.2f°C above actual feed temp)",
+                            adjusted_target, calculated_flow, (calculated_flow - actual_flow_temp));
+
+                    return adjusted_target;
+                }
+            }
+            else 
+            {
+                if ((actual_flow_temp - calculated_flow) > MAX_FEED_STEP_CHANGE)
+                {
+                    float adjusted_target = actual_flow_temp - MAX_FEED_STEP_ADJUSTMENT;
+                    
+                    ESP_LOGW(OPTIMIZER_TAG, "Heating/DHW flow adjust: %.2f°C to prevent compressor stop! (setpoint: %.2f°C is %.2f°C below actual feed temp)",
+                            adjusted_target, calculated_flow, (actual_flow_temp - calculated_flow));
+
+                    return adjusted_target;
+                }
+            }
+
+            return calculated_flow;
+        }
     } // namespace optimizer
 } // namespace esphome

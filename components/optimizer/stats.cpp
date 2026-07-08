@@ -10,19 +10,19 @@ namespace esphome
     namespace optimizer
     {
         // Raw Data Collection Model
-        void Optimizer::update_heat_model()
+        void Optimizer::update_heat_model()ce->get_status();
+            
+            uint32_t now = millis();
+            bool is_running = (status.CompressorFrequency
         {
             if (this->state_.ecodan_instance == nullptr) return;
-            auto &status = this->state_.ecodan_instance->get_status();
-            uint32_t now = millis();
-            bool is_running = (status.CompressorFrequency > 0) || status.CompressorOn;
+            auto &status = this->state_.ecodan_instan > 0) || status.CompressorOn;
             bool is_heating_active = status.Operation == esphome::ecodan::Status::OperationMode::HEAT_ON;
+            bool is_cooling_active = status.Operation == esphome::ecodan::Status::OperationMode::COOL_ON;
 
             if (this->last_check_ms_ != 0) {    
                 float minutes_passed = (now - this->last_check_ms_) / 60000.0f;
 
-                // If gap > 10 minutes (reboot/reconnect), reset free cooling window
-                // to avoid accumulating stale time into the measurement.
                 if (minutes_passed > 10.0f) {
                     if (this->fc_active_) {
                         ESP_LOGD(OPTIMIZER_TAG, "Free heating/cooling window reset after %.0f min gap (reconnect/reboot)", minutes_passed);
@@ -32,13 +32,19 @@ namespace esphome
                     return;
                 }
 
+                // Track runtimes separately
                 if (is_running && is_heating_active) {
                     this->daily_runtime_global += minutes_passed;
+                }
+                if (is_running && is_cooling_active) {
+                    this->daily_runtime_cool_ += minutes_passed;
                 }
 
                 // --- Free cooling window (HP-off period, any time of day) ---
                 float current_room_tmp = this->get_room_current_temp(OptimizerZone::ZONE_1);
-                bool hp_off = !is_running || !is_heating_active;
+                
+                // The HP is only "off" for passive drift learning if it's NOT heating AND NOT cooling.
+                bool hp_off = !is_running || (!is_heating_active && !is_cooling_active);
 
                 if (!isnan(current_room_tmp) && !isnan(status.OutsideTemperature)) {
                     if (hp_off && !this->fc_active_) {
@@ -69,7 +75,7 @@ namespace esphome
                         // Base quality gates (need enough time and a decent inside/outside delta)
                         if (t_hours >= 2.0f && delta_T_avg > 2.0f) {
                             
-                            if (avg_sol < 50.0f) {
+                            if (avg_sol < 150.0f) {
                                 // NO SIGNIFICANT SOLAR: Learn pure thermal time constant (Tau).
                                 // Happens at night or during heavily overcast days.
                                 // Strictly require the room to have cooled down to calculate physics.
@@ -214,11 +220,27 @@ namespace esphome
             if (current_day != this->last_processed_day_) {
                 ESP_LOGI(OPTIMIZER_TAG, "Raw Data Collection: Day transition detected (%d -> %d). Saving stats...", 
                          this->last_processed_day_, current_day);
+
+                this->sync_odin_data_day();
+
+                // FTC4/FTC5 Fallback Logic (Consumption Only)
+                if (this->last_total_heating_consumed_ <= 0.01f && this->daily_runtime_global > 0.0f) {
+                    ESP_LOGI(OPTIMIZER_TAG, "Real-time heating consumption empty. Falling back to daily Ecodan sensor.");
+                    
+                    if (this->state_.ftc_heating_consumed != nullptr && this->state_.ftc_heating_consumed->has_state()) {
+                        this->last_total_heating_consumed_ = this->state_.ftc_heating_consumed->state;
+                    }
+                }
+
+                if (this->last_total_cooling_consumed_ <= 0.01f && this->daily_runtime_cool_ > 0.0f) {
+                    ESP_LOGI(OPTIMIZER_TAG, "Real-time cooling consumption empty. Falling back to daily Ecodan sensor.");
+
+                    if (this->state_.ftc_cooling_consumed != nullptr && this->state_.ftc_cooling_consumed->has_state()) {
+                        this->last_total_cooling_consumed_ = this->state_.ftc_cooling_consumed->state;
+                    }
+                }
                 
                 this->update_learning_model(this->last_processed_day_);
-
-                // trigger new data fetch
-                this->set_odin_fetch_request();
 
                 // Reset variables for the new day
                 this->last_processed_day_ = current_day;
@@ -233,55 +255,145 @@ namespace esphome
                 this->daily_max_output_power_ = 0.0f;
                 
                 this->daily_runtime_global = 0.0f;
+                this->daily_runtime_cool_ = 0.0f;
+
+                // Reset daily accumulators
+                this->last_total_heating_produced_ = 0.0f;
+                this->last_total_heating_consumed_ = 0.0f;
+                this->last_total_cooling_produced_ = 0.0f;
+                this->last_total_cooling_consumed_ = 0.0f;
+
+                this->last_total_dhw_produced_ = 0.0f;
+                this->last_total_dhw_consumed_ = 0.0f;
+                
+                // Reset global trackers to prevent false deltas across midnight
+                this->last_global_prod_ = -1.0f;
+                this->last_global_cons_ = -1.0f;
+
+                // Reset wind-down window — any session spanning midnight gets cleanly cut off
+                this->last_was_dhw_     = false;
+                this->last_was_heating_ = false;
+                this->last_run_time_    = UINT32_MAX - 700000UL;
             }
 
             // HOURLY MPC TRIGGER
             if (this->solver_enabled()) {
-                if (current_hour != this->last_processed_hour_) {
-                    ESP_LOGD(OPTIMIZER_TAG, "Hour transition detected (%d -> %d).", this->last_processed_hour_, current_hour);
-                    this->set_odin_fetch_request();
-                    this->last_processed_hour_ = current_hour;
-                } else {
-                    time_t ts = this->state_.ecodan_instance->get_status().timestamp();
-                    if (ts > 0) {
-                        struct tm t;
-                        localtime_r(&ts, &t);
-                        int cur_min = t.tm_min;
-                        if (cur_min >= 55 && current_hour != this->last_pre_hour_triggered_) {
-                            this->last_pre_hour_triggered_ = current_hour;
-                            ESP_LOGI(OPTIMIZER_TAG, "Pre-hour trigger at %02d:55 — requesting ODIN solve for hour %d.",
-                                    current_hour, (current_hour + 1) % 24);
-                            this->set_odin_fetch_request();
-                        }
+                time_t ts = this->state_.ecodan_instance->get_status().timestamp();
+                if (ts > 0) {
+                    struct tm t;
+                    localtime_r(&ts, &t);
+                    int cur_min = t.tm_min;
+                    if (cur_min >= 55 && current_hour != this->last_pre_hour_triggered_) {
+                        this->last_pre_hour_triggered_ = current_hour;
+                        ESP_LOGI(OPTIMIZER_TAG, "Pre-hour trigger at %02d:55 — requesting ODIN solve for hour %d.",
+                                current_hour, (current_hour + 1) % 24);
+                        this->set_odin_fetch_request();
                     }
                 }
             }
 
-            // Set latest energy snapshots
-            bool heating_now = is_running && is_heating_active;
-
-            auto snap_energy = [&]() {
-                this->last_total_heating_produced_ = this->state_.daily_heating_produced->state;
-                if (this->state_.solver_kwh_meter_feedback_source == nullptr ||
-                    this->state_.solver_kwh_meter_feedback_source->active_index().value_or(0) == 0) {
-                    this->last_total_heating_consumed_ = this->state_.daily_heating_consumed->state;
-                } else {
-                    this->last_total_heating_consumed_ = (this->state_.solver_kwh_meter_feedback != nullptr) ?
-                                                        this->state_.solver_kwh_meter_feedback->state : 0.0f;
-                }
-            };
-
-            if (heating_now) {
-                snap_energy();
-                this->last_was_heating_ = true;
-            } else if (this->last_was_heating_) {
-                // Transition: heating → DHW/idle. Snap clean baseline before DHW contaminates meter.
-                snap_energy();
-                this->last_was_heating_ = false;
-                ESP_LOGD(OPTIMIZER_TAG, "Heating stopped — clean energy baseline saved: cons=%.3f prod=%.3f",
-                         this->last_total_heating_consumed_, this->last_total_heating_produced_);
+            // Track the last active mode persistently to catch delayed meter updates and wind-down.
+            // Uses member variables (not statics) so state is tied to the Optimizer instance
+            // and resets correctly on day rollover.
+            if (is_running) {
+                this->last_run_time_ = millis();
+                this->last_was_dhw_ = (status.Operation == esphome::ecodan::Status::OperationMode::DHW_ON ||
+                                       status.Operation == esphome::ecodan::Status::OperationMode::LEGIONELLA_PREVENTION);
+                this->last_was_heating_ = is_heating_active;
+                this->last_was_cooling_ = is_cooling_active;
             }
+
+            bool dhw_active_window = false;
+            bool heat_active_window = false;
+            bool cool_active_window = false;
+
+            if (is_running || (millis() - this->last_run_time_ <= 600000)) {
+                if (this->last_was_dhw_)          dhw_active_window  = true;
+                else if (this->last_was_heating_) heat_active_window = true;
+                else if (this->last_was_cooling_) cool_active_window = true;
+            } else {
+                // Window expired — clear so next session starts clean
+                this->last_was_dhw_     = false;
+                this->last_was_heating_ = false;
+                this->last_was_cooling_ = false;
+            }
+
+            // Fetch current global meter states
+            float current_global_prod = (this->state_.daily_heating_produced != nullptr && this->state_.daily_heating_produced->has_state()) 
+                                        ? this->state_.daily_heating_produced->state : NAN;
+            
+            float current_global_cons = NAN;
+            if (this->state_.solver_kwh_meter_feedback_source == nullptr ||
+                this->state_.solver_kwh_meter_feedback_source->active_index().value_or(0) == 0) {
+                if (this->state_.daily_heating_consumed != nullptr && this->state_.daily_heating_consumed->has_state())
+                    current_global_cons = this->state_.daily_heating_consumed->state;
+            } else {
+                if (this->state_.solver_kwh_meter_feedback != nullptr && this->state_.solver_kwh_meter_feedback->has_state())
+                    current_global_cons = this->state_.solver_kwh_meter_feedback->state;
+            }
+
+            // 1. Process Production Delta.
+            // On midnight reset the sensor drops back to 0, giving a negative delta.
+            // Re-anchor the baseline without emitting a delta so the next tick is correct.
+            float delta_prod = 0.0f;
+            if (!std::isnan(current_global_prod)) {
+                if (this->last_global_prod_ < 0) {
+                    // First valid reading after boot — anchor, emit nothing
+                    this->last_global_prod_ = current_global_prod;
+                } else {
+                    float raw_prod = current_global_prod - this->last_global_prod_;
+                    if (raw_prod >= 0) {
+                        delta_prod = raw_prod;
+                    } else {
+                        // Midnight reset detected — re-anchor silently
+                        ESP_LOGD(OPTIMIZER_TAG, "Prod meter reset (%.2f -> %.2f), re-anchoring",
+                                 this->last_global_prod_, current_global_prod);
+                    }
+                    this->last_global_prod_ = current_global_prod;
+                }
+            }
+
+            // 2. Process Consumption Delta.
+            // Same midnight reset handling: re-anchor without emitting a delta.
+            // Standby power accumulated since midnight is correctly ignored.
+            float delta_cons = 0.0f;
+            if (!std::isnan(current_global_cons)) {
+                if (this->last_global_cons_ < 0) {
+                    // First valid reading after boot — anchor, emit nothing
+                    this->last_global_cons_ = current_global_cons;
+                } else {
+                    float raw_cons = current_global_cons - this->last_global_cons_;
+                    if (raw_cons >= 0) {
+                        delta_cons = raw_cons;
+                    } else {
+                        // Midnight reset detected — re-anchor silently
+                        ESP_LOGD(OPTIMIZER_TAG, "Cons meter reset (%.2f -> %.2f), re-anchoring",
+                                 this->last_global_cons_, current_global_cons);
+                    }
+                    this->last_global_cons_ = current_global_cons;
+                }
+            }
+
+            // 3. Bucket the deltas accurately.
+            // Ignore physically impossible hardware spikes (>50 kWh in a minute).
+            if (delta_prod < 50.0f && delta_cons < 50.0f) {
+                if (heat_active_window) {
+                    this->last_total_heating_produced_ += delta_prod;
+                    this->last_total_heating_consumed_ += delta_cons;
+                } else if (cool_active_window) {
+                    this->last_total_cooling_produced_ += delta_prod;
+                    this->last_total_cooling_consumed_ += delta_cons;
+                } else if (dhw_active_window) {
+                    this->last_total_dhw_produced_ += delta_prod;
+                    this->last_total_dhw_consumed_ += delta_cons;
+                }
+                // Pure standby (no active window) falls through and is safely ignored
+            }
+
+            // Maintain total raw consumption for YAML dashboard tracking
+            this->last_total_all_consumed_ = current_global_cons;
         }
+
 
         void Optimizer::update_learning_model(int day_of_year)
         {
@@ -307,14 +419,13 @@ namespace esphome
             float elec_consumed_kwh = this->last_total_heating_consumed_;
             float max_out_kw = this->daily_max_output_power_;
 
+            // Cooling local variables
+            float cool_runtime_hours = this->daily_runtime_cool_ / 60.0f;
+            float cool_produced_kwh = this->last_total_cooling_produced_;
+            float cool_elec_consumed_kwh = this->last_total_cooling_consumed_;
+
             ESP_LOGI(OPTIMIZER_TAG, "Daily Raw Stats: Heat=%.1fkWh, Elec=%.1fkWh, Run=%.1fh, MaxOut=%.1fkW, AvgOut=%.1fC, AvgRoom=%.1fC, DeltaRoom=%.1fC",
                      heat_produced_kwh, elec_consumed_kwh, runtime_hours, max_out_kw, avg_outside, avg_room, delta_room);
-            
-            // Only update the globals if significant heating occurred (> 2 kWh produced, > 1 hour run)
-            if (heat_produced_kwh < 2.0f || runtime_hours < 1.0f) {
-                ESP_LOGD(OPTIMIZER_TAG, "Stats Collection: Skipped. Insufficient heating data today.");
-                return;
-            }
 
             // Helper for Exponential Moving Average (EMA) on Number components
             auto update_ema_num = [](esphome::number::Number *comp, float observed, float alpha) {
@@ -331,23 +442,48 @@ namespace esphome
 
             const float ALPHA = 0.15f; 
 
-            update_ema_num(this->state_.num_raw_heat_produced, heat_produced_kwh, ALPHA);
-            update_ema_num(this->state_.num_raw_elec_consumed, elec_consumed_kwh, ALPHA);
-            update_ema_num(this->state_.num_raw_runtime_hours, runtime_hours, ALPHA);
-            // avg_outside_temp is already a daily mean — publish raw so the solver
-            if (this->state_.num_raw_avg_outside_temp != nullptr) {
-                auto outside_call = this->state_.num_raw_avg_outside_temp->make_call();
-                outside_call.set_value(avg_outside);
-                outside_call.perform();
-            }
+            auto safe_get = [](esphome::number::Number *comp, float fallback) {
+                return comp != nullptr ? comp->state : fallback;
+            };
+
+            // ALWAYS UPDATE: Passive Data & Building Physics ---
             update_ema_num(this->state_.num_raw_avg_room_temp, avg_room, ALPHA);
             update_ema_num(this->state_.num_raw_delta_room_temp, delta_room, ALPHA);
-            //update_ema_num(this->state_.num_raw_max_output, max_out_kw, ALPHA);
+            // Always track to avoid COP/EER normalisation issues when there is no heating/cooling
+            update_ema_num(this->state_.num_raw_avg_outside_temp,      avg_outside, ALPHA);
+            update_ema_num(this->state_.num_raw_cool_avg_outside_temp, avg_outside, ALPHA);
 
-            ESP_LOGI(OPTIMIZER_TAG, "Numbers updated (15%% EMA): Heat=%.1fkWh, Elec=%.1fkWh, Run=%.1fh, AvgOut=%.1fC, AvgRoom=%.1fC, DeltaRoom=%.1fC",
-                     this->state_.num_raw_heat_produced->state, this->state_.num_raw_elec_consumed->state, 
-                     this->state_.num_raw_runtime_hours->state, this->state_.num_raw_avg_outside_temp->state,
-                     this->state_.num_raw_avg_room_temp->state, this->state_.num_raw_delta_room_temp->state);
+            // ONLY UPDATE WHEN HEATING OR COOLING: System Performance ---
+            if (heat_produced_kwh >= 2.0f && runtime_hours >= 1.0f) {
+                update_ema_num(this->state_.num_raw_heat_produced, heat_produced_kwh, ALPHA);
+                update_ema_num(this->state_.num_raw_elec_consumed, elec_consumed_kwh, ALPHA);
+                update_ema_num(this->state_.num_raw_runtime_hours, runtime_hours, ALPHA);
+
+                ESP_LOGI(OPTIMIZER_TAG, "Full Heating update (15%% EMA): Heat=%.1fkWh, Elec=%.1fkWh, Run=%.1fh, AvgOut=%.1fC, AvgRoom=%.1fC",
+                         safe_get(this->state_.num_raw_heat_produced, heat_produced_kwh), 
+                         safe_get(this->state_.num_raw_elec_consumed, elec_consumed_kwh), 
+                         safe_get(this->state_.num_raw_runtime_hours, runtime_hours), 
+                         safe_get(this->state_.num_raw_avg_outside_temp, avg_outside),
+                         safe_get(this->state_.num_raw_avg_room_temp, avg_room));
+
+            } else if (cool_produced_kwh >= 2.0f && cool_runtime_hours >= 1.0f) {
+                update_ema_num(this->state_.num_raw_cool_produced, cool_produced_kwh, ALPHA);
+                update_ema_num(this->state_.num_raw_cool_elec_consumed, cool_elec_consumed_kwh, ALPHA);
+                update_ema_num(this->state_.num_raw_cool_runtime_hours, cool_runtime_hours, ALPHA);
+
+                ESP_LOGI(OPTIMIZER_TAG, "Full Cooling update (15%% EMA): CoolProd=%.1fkWh, CoolElec=%.1fkWh, Run=%.1fh, AvgOut=%.1fC",
+                         safe_get(this->state_.num_raw_cool_produced, cool_produced_kwh), 
+                         safe_get(this->state_.num_raw_cool_elec_consumed, cool_elec_consumed_kwh), 
+                         safe_get(this->state_.num_raw_cool_runtime_hours, cool_runtime_hours), 
+                         safe_get(this->state_.num_raw_cool_avg_outside_temp, avg_outside));
+
+            } else {
+                // Output a log message, but do not abort before passive stats are saved
+                ESP_LOGI(OPTIMIZER_TAG, "Passive stats saved (AvgOut=%.1fC, AvgRoom=%.1fC, DeltaRoom=%.1fC). Heating/Cooling skipped (<2kWh or <1h).",
+                         safe_get(this->state_.num_raw_avg_outside_temp, avg_outside), 
+                         safe_get(this->state_.num_raw_avg_room_temp, avg_room), 
+                         safe_get(this->state_.num_raw_delta_room_temp, delta_room));
+            }
         }
 
     } // namespace optimizer
