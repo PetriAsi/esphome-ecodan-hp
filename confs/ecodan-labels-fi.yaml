@@ -168,3 +168,27 @@ substitutions:
   solver_kwh_meter_feedback_source: "Energiamittarin lähde"
   solver_kwh_meter_option_internal: "Sisäinen energiamittari"
   solver_kwh_meter_feedback: "kWh-mittari"
+
+  solver_dhw_mode: Ratkaisimen käyttövesitila
+  solver_dhw_mode_option_regular: Normaali
+  solver_dhw_mode_option_forced: Pakotettu
+
+  asgard_vt_temp_sensor_source: 'Virtuaalisen termostaatin lähde'
+
+  sw_use_solver: "Ota käyttöön dynaaminen kustannusratkaisija"
+  bin_solver_connected: "Ratkaisijan online-tila"
+  num_raw_heat_produced: "Raaka tuotettu lämpö (kWh)"
+  num_raw_elec_consumed: "Raaka kulutettu sähkö (kWh)"
+  num_raw_runtime_hours: "Raaka käyntiaika (Tuntia)"
+  num_raw_avg_outside_temp: "Raaka keskim. ulkolämpötila (°C)"
+  num_raw_avg_room_temp: "Raaka keskim. huonelämpötila (°C)"
+  num_raw_delta_room_temp: "Raaka huonelämpötilan delta (°C)"
+  num_battery_soc_kwh: "Akun varaustila (kWh)"
+  num_battery_max_discharge_kw: "Akun maksimipurkaus (kW)"
+  num_raw_hl_tm_product: "Raaka HL×TM-tulo"
+  num_raw_solar_factor: "Passiivisen aurinkolämmön kerroin"
+
+  num_raw_cool_produced: "Tuotettu jäähdytys (Raaka)"
+  num_raw_cool_elec_consumed: "Jäähdytyksen sähkönkulutus (Raaka)"
+  num_raw_cool_runtime_hours: "Jäähdytyksen käyntiaika (Raaka)"
+  num_raw_cool_avg_outside_temp: "Keskim. ulkolämpötila jäähd. (Raaka)"
