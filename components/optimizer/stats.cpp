@@ -10,13 +10,13 @@ namespace esphome
     namespace optimizer
     {
         // Raw Data Collection Model
-        void Optimizer::update_heat_model()ce->get_status();
-            
-            uint32_t now = millis();
-            bool is_running = (status.CompressorFrequency
+        void Optimizer::update_heat_model()
         {
             if (this->state_.ecodan_instance == nullptr) return;
-            auto &status = this->state_.ecodan_instan > 0) || status.CompressorOn;
+            auto &status = this->state_.ecodan_instance->get_status();
+            
+            uint32_t now = millis();
+            bool is_running = (status.CompressorFrequency > 0) || status.CompressorOn;
             bool is_heating_active = status.Operation == esphome::ecodan::Status::OperationMode::HEAT_ON;
             bool is_cooling_active = status.Operation == esphome::ecodan::Status::OperationMode::COOL_ON;
 
