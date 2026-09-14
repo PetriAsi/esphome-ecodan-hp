@@ -119,7 +119,7 @@ substitutions:
   status_multi_zone_zone2: Vyöhyke 2 käytössä
   fault_code_text: Vikakoodi
   refrigerant_error_code_text: Kylmäaineen vikakoodi
-  refrigerant_code: Kylmäaine
+  #refrigerant_code: Kylmäaine
   compressor_starts: Kompressorin käynnistykset yhteensä
   discharge_temp: Puristuslämpötila
   ou_liquid_pipe_temp: Ulkoyksikön nestelinjan lämpötila 1
@@ -130,6 +130,7 @@ substitutions:
   super_heat_temp: Puristuksen ylikuumenemislämpötila
   sub_cool_temp: Alijäähdytyslämpötila
   fan_speed: Puhaltimen nopeus
+  # short cycle translations
   status_short_cycle_lockout: 'Lyhytsykli: Lukitus'
   minimum_compressor_on_time: 'Lyhytsykli: Vähimmäiskäyntiaika'
   lockout_duration: 'Lyhytsykli: Lukitusaika (min)'
@@ -139,6 +140,7 @@ substitutions:
   short_cycle_mitigation_button: 'Lyhytsykli: Peruuta lukitus'
   predictive_short_cycle_control_enabled: 'Lyhytsykli: Ennakoiva esto'
   status_predictive_boost_active: 'Lyhytsykli: Ennakoiva tehostus aktiivinen'
+  # auto adaptive translations
   auto_adaptive_control_enabled: 'Mukautuva ohjaus'
   maximum_heating_flow_temp: 'Mukautuva ohjaus: Lämmityksen enimmäismenovesilämpötila'
   minimum_heating_flow_temp: 'Mukautuva ohjaus: Lämmityksen vähimmäismenovesilämpötila'
@@ -156,27 +158,34 @@ substitutions:
   temperature_feedback: 'Mukautuva ohjaus: Huonelämpötilan palaute'
   defrost_risk_handling_enabled: 'Mukautuva ohjaus: Sulatuksen vähentäminen'
   smart_boost_enabled: 'Mukautuva ohjaus: Älykäs tehostus'
+
+  # total increasing energy totals
   total_increasing_heating_consumed: Lämmityksen kokonaiskulutus
   total_increasing_heating_delivered: Lämmityksen kokonaistuotto
   total_increasing_cool_consumed: Jäähdytyksen kokonaiskulutus
   total_increasing_cool_delivered: Jäähdytyksen kokonaistuotto
   total_increasing_dhw_consumed: LKV kokonaiskulutus
   total_increasing_dhw_delivered: LKV kokonaistuotto
+
+  # pump details
   pump_speed: 'Pumpun nopeus'
   pump_feedback: 'Pumpun kulutus'
   pump_feedback_status: 'Pumpun tila'
+
+  # master thermostats
   master_thermostat: 'Päähuoneen anturi'
 
+  # stats collection
   solver_kwh_meter_feedback_source: "Energiamittarin lähde"
   solver_kwh_meter_option_internal: "Sisäinen energiamittari"
   solver_kwh_meter_feedback: "kWh-mittari"
-
   solver_dhw_mode: Ratkaisimen käyttövesitila
   solver_dhw_mode_option_regular: Normaali
   solver_dhw_mode_option_forced: Pakotettu
 
   asgard_vt_temp_sensor_source: 'Virtuaalisen termostaatin lähde'
 
+  # solver settings
   sw_use_solver: "Ota käyttöön dynaaminen kustannusratkaisija"
   bin_solver_connected: "Ratkaisijan online-tila"
   num_raw_heat_produced: "Raaka tuotettu lämpö (kWh)"
@@ -189,7 +198,6 @@ substitutions:
   num_battery_max_discharge_kw: "Akun maksimipurkaus (kW)"
   num_raw_hl_tm_product: "Raaka HL×TM-tulo"
   num_raw_solar_factor: "Passiivisen aurinkolämmön kerroin"
-
   num_raw_cool_produced: "Tuotettu jäähdytys (Raaka)"
   num_raw_cool_elec_consumed: "Jäähdytyksen sähkönkulutus (Raaka)"
   num_raw_cool_runtime_hours: "Jäähdytyksen käyntiaika (Raaka)"
