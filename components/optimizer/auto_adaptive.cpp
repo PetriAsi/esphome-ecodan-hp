@@ -67,7 +67,7 @@ namespace esphome
         // ─────────────────────────────────────────────────────────────────
         // ODIN solver bias — mutex-safe, returns {bias, heatpump_off}
         // ─────────────────────────────────────────────────────────────────
-        Optimizer::SolverResult Optimizer::resolve_solver_result_(float room_target_temp, float current_room_temp) {
+        Optimizer::SolverResult Optimizer::resolve_solver_result_(std::size_t zone, float room_target_temp, float current_room_temp) {
             SolverResult result{-1.0f, false, OptimizerOperationMode::UNAVAILABLE, -1 };
 
             if (this->state_.sw_use_solver == nullptr || !this->state_.sw_use_solver->state)
@@ -90,12 +90,21 @@ namespace esphome
                 
                 if (current_hour >= 0 && current_hour < 24) {
                     auto mode = to_operation_mode(this->odin_operation_mode_[current_hour]);
-                    float odin_prod   = this->odin_production_[current_hour];
+                    // Per-zone production plan from the two-zone solve. Falls
+                    // back to the combined (whole-pump) plan when the solver
+                    // answered single-zone (the zone vectors stay empty then).
+                    const std::vector<float> &prod_vec =
+                        (zone == 1 && this->odin_production_z2_.size() == this->odin_production_.size())
+                            ? this->odin_production_z2_
+                            : (zone == 0 && this->odin_production_z1_.size() == this->odin_production_.size())
+                                ? this->odin_production_z1_
+                                : this->odin_production_;
+                    float odin_prod   = prod_vec[current_hour];
 
                     // look ahead during lock
                     int next_hour = (current_hour + 1) % 24;
                     auto next_mode = to_operation_mode(this->odin_operation_mode_[next_hour]);
-                    float next_prod  = this->odin_production_[next_hour];
+                    float next_prod  = prod_vec[next_hour];
 
                     xSemaphoreGive(this->odin_mutex_);
 
@@ -116,7 +125,8 @@ namespace esphome
                                           mode != OptimizerOperationMode::HEAT_ON);
 
                     // Fall-forward logic: if currently off or doing DHW/Legionella, 
-                    if (odin_last_executed_dhw_hour_ != -1 && (result.heatpump_off || mode == OptimizerOperationMode::DHW_ON || mode == OptimizerOperationMode::LEGIONELLA_PREVENTION)) {
+                    if (odin_last_executed_dhw_hour_ != -1
+                        && (result.heatpump_off || mode == OptimizerOperationMode::DHW_ON || mode == OptimizerOperationMode::LEGIONELLA_PREVENTION)) {
 
                         if (!std::isnan(next_prod) && next_mode != OptimizerOperationMode::UNAVAILABLE) {
                             bool next_off = (next_prod < 0.1f &&
@@ -136,12 +146,14 @@ namespace esphome
                         }
                     }
 
-                    if (result.heatpump_off) {
-                        apply_solver_soft_stop(true);
+                    OptimizerZone oz = (zone == 0) ? OptimizerZone::ZONE_1 : OptimizerZone::ZONE_2;
+
+                    if (result.heatpump_off || odin_prod < 0.1f) {
+                        apply_solver_soft_stop(true, oz);
                         return result;
                     }
                     
-                    apply_solver_soft_stop(false);
+                    apply_solver_soft_stop(false, oz);
                     
                     float max_out = 7.0f;
                     if (this->odin_max_output_ != 0) {
@@ -229,8 +241,7 @@ namespace esphome
                     calculated_flow = actual_return_temp + target_delta;
                 }
 
-                // Predictive boost adjustment (fetch feed temp once; reused by buffer guard below)
-                auto &pcp_adj = (zone_i == 1) ? this->pcp_adjustment_z2_ : this->pcp_adjustment_z1_;
+                // Fetch feed temp once (reused by the buffer guard below).
                 float actual_flow_temp = this->get_feed_temp(
                     (zone_i == 0) ? OptimizerZone::ZONE_1 : OptimizerZone::ZONE_2);
 
@@ -251,14 +262,7 @@ namespace esphome
 
                 calculated_flow = this->round_nearest(calculated_flow);
 
-                if (pcp_adj > 0.0f) {
-                    if ((actual_flow_temp - calculated_flow) >= 1.0f) {
-                        calculated_flow += pcp_adj;
-                    } else {
-                        pcp_adj = 0.0f;
-                    }
-                }
-                ESP_LOGD(OPTIMIZER_TAG, "Z%d HEATING: flow=%.2f°C, return=%.2f°C (boost %.1f)", (zone_i + 1), calculated_flow, actual_return_temp, pcp_adj);
+                ESP_LOGD(OPTIMIZER_TAG, "Z%d HEATING: flow=%.2f°C, return=%.2f°C", (zone_i + 1), calculated_flow, actual_return_temp);
             }
 
             bool cooling_mode = is_cooling_mode(status, (zone_i == 0) ? OptimizerZone::ZONE_1 : OptimizerZone::ZONE_2);
@@ -358,9 +362,9 @@ namespace esphome
             auto heating_type_index = this->state_.heating_system_type->active_index().value_or(0);
 
             bool is_heating_mode   = status.is_auto_adaptive_heating(zone);
-            bool is_heating_active = status.Operation == esphome::ecodan::Status::OperationMode::HEAT_ON;
+            bool is_heating_active = is_compressor_active(status) && status.Operation == esphome::ecodan::Status::OperationMode::HEAT_ON;
             bool is_cooling_mode   = status.has_cooling() && status.is_auto_adaptive_cooling(zone);
-            bool is_cooling_active = status.Operation == esphome::ecodan::Status::OperationMode::COOL_ON;
+            bool is_cooling_active = is_compressor_active(status) && status.Operation == esphome::ecodan::Status::OperationMode::COOL_ON;
 
             // Multi-zone heating active refinement
             if (is_heating_active && status.has_2zones()) {
@@ -410,7 +414,7 @@ namespace esphome
             bool solver_enabled = this->solver_enabled();
 
             if (solver_enabled) {
-                auto [solver_load_ratio, solver_heatpump_off, solver_operating_mode, current_hour] = this->resolve_solver_result_(room_target_temp, room_temp);
+                auto [solver_load_ratio, solver_heatpump_off, solver_operating_mode, current_hour] = this->resolve_solver_result_(i, room_target_temp, room_temp);
                 
                 if (solver_operating_mode == OptimizerOperationMode::DHW_ON || solver_operating_mode == OptimizerOperationMode::LEGIONELLA_PREVENTION) {
                     return; 
@@ -522,7 +526,7 @@ namespace esphome
                 bool z1_locked = override_z1 != nullptr && override_z1->state;
                 bool z2_locked = override_z2 != nullptr && override_z2->state;
                 
-                if (z1_locked || z2_locked || this->solver_stop_active_) {
+                if (z1_locked || z2_locked || this->solver_stop_active_[0] || this->solver_stop_active_[1]) {
                     ESP_LOGI(OPTIMIZER_TAG, "Solver/AA disabled, but override switches are active. Forcing release.");
                     if (override_z1 != nullptr && override_z1->state) override_z1->turn_off();
                     if (override_z2 != nullptr && override_z2->state) override_z2->turn_off();
@@ -542,7 +546,7 @@ namespace esphome
             auto &status = this->state_.ecodan_instance->get_status();
 
             if (solver_enabled) {
-                auto [solver_load_ratio, solver_heatpump_off, solver_operating_mode, current_hour] = this->resolve_solver_result_(0.0f, 0.0f);
+                auto [solver_load_ratio, solver_heatpump_off, solver_operating_mode, current_hour] = this->resolve_solver_result_(0, 0.0f, 0.0f);
                 
                 if (solver_operating_mode == OptimizerOperationMode::DHW_ON) {
                     int dhw_mode = 0; // 0 = Regular, 1 = Forced
@@ -623,8 +627,9 @@ namespace esphome
             float cold_factor = cf_raw * cf_raw * 1.5f;
 
             ESP_LOGD(OPTIMIZER_TAG,
-                "[*] Auto-adaptive cycle: independent_zone_temps=%d has_cooling=%d cold_factor=%.2f min_delta=%.2f max_delta=%.2f",
-                status.has_independent_zone_temps(), status.has_cooling(), cold_factor, prof.base_min_delta_t, prof.max_delta_t);
+                "[*] Auto-adaptive cycle: independent_zone_temps=%d has_cooling=%d cold_factor=%.2f min_delta=%.2f max_delta=%.2f multizone_status=%d operation=%d",
+                status.has_independent_zone_temps(), status.has_cooling(), cold_factor, prof.base_min_delta_t, prof.max_delta_t,
+                status.MultiZoneStatus, static_cast<uint8_t>(status.Operation));
 
             auto max_zones = status.has_2zones() ? 2 : 1;
 

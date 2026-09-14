@@ -58,6 +58,7 @@ namespace ecodan
         
         bool WaterPump2Active;
         bool WaterPump3Active;
+        bool WaterPump4Active;
         bool ThreeWayValveActive;
         bool ThreeWayValve2Active;
         uint8_t MixingValveStatus;
@@ -175,7 +176,7 @@ namespace ecodan
         float EnergyConsumedIncreasing{0};
 
         // Service codes
-        uint16_t RcCompressorStarts;
+        uint32_t RcCompressorStarts;
         float RcDischargeTemp;
         float RcOuLiquidPipeTemp;
         float RcOuTwoPhasePipeTemp;
@@ -197,7 +198,7 @@ namespace ecodan
             return ControllerDateTime.tm_yday;
         }
 
-        const time_t timestamp() const {
+        time_t timestamp() const {
             if (ControllerDateTime.tm_year < 100)
                 return -1;
             struct tm dt = ControllerDateTime; 
@@ -229,9 +230,29 @@ namespace ecodan
             return false;
         }
 
+        bool is_ftc5_or_lower() const {
+            return Controller < 3;
+        }
+
+        float get_tank_temperature() const { 
+            if ((is_ftc5_or_lower() || DhwSecondaryTemperature == 0.0f) || DhwSecondaryTemperature == 25.0f)
+                return DhwTemperature;
+            
+            // for package units, the secondary temp is the top tank temp
+            // DhwSecondaryTemperature == 25.0f for ftc6+ without secondary sensor
+            return DhwSecondaryTemperature;
+        }
+
+        float get_lower_tank_temperature() const {
+            if ((is_ftc5_or_lower() || DhwSecondaryTemperature == 0.0f) || DhwSecondaryTemperature == 25.0f)
+                return NAN;
+            
+            return DhwTemperature;
+        }
+
         CONTROLLER_FLAG get_svc_flags() const
         {
-            CONTROLLER_FLAG flag;
+            CONTROLLER_FLAG flag{};
             if (ProhibitDhw)
                 flag |= CONTROLLER_FLAG::PROHIBIT_DHW;
             if (ProhibitHeatingZ1)

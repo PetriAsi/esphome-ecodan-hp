@@ -9,23 +9,26 @@
 ### Why use the Asgard Sub-assembly?
 * Enables Virtual Thermostat control (IN1/IN6) as a modern alternative to CNRF.
 * High-resolution temperature sensor integration (DS18B20 support).
-* Pass-through (Slave) port functionality for Melcloud or Procon modules.
+* Pass-through (Proxy) port functionality for Melcloud or Procon modules.
 * 100% Local control (No Cloud dependency).
 
 # Ordering & Availability
-* **Product:** Asgard PCB: ESP32-S3 Development Sub-assembly + **50cm** Connector cable
-* **Price:** € 65,- (including VAT)
+* **Product:** Asgard PCB: ESP32-S3 Development Sub-assembly + **50cm** Connector cable (Odin enclosure optional)
+* **Price:** From € 65,- (including VAT)
 * **Delivery:** Shipped within 3 business days from The Netherlands (When in stock)
 
+> **New to ODIN?** Read the [ODIN whitepaper](https://gekkekoe.github.io/heatpump-optimizer/) first — what it does and a payback calculator — before ordering the bundle below.
+
 <div align="center">
-  <h2>Order via the link/button below:</h2>
+  <h2>Order via the links/buttons below:</h2>
 
-> ⚠️ **Asgard is currently in stock**
+  ⚠️ **Asgard and Odin are currently in stock** <br>
+  ⚠️ **Due to regulation (PPWR), shipping to EU countries other than NL has been [suspended](https://github.com/gekkekoe/esphome-ecodan-hp/discussions/399)**
 
-| Standard Order (NL/EU) |
+
+| Standard Order (NL) |
 | :--- |
-| [![Order Asgard](https://img.shields.io/badge/Order-Single%20Unit-0070BA?style=for-the-badge&logo=stripe&logoColor=white)](https://buy.stripe.com/aFa6oIblrcIPaNN3Wq4AU00)|
-
+| [![Order Standard](https://img.shields.io/badge/Order-Standard%20Order-0070BA?style=for-the-badge&logo=stripe&logoColor=white)](https://buy.stripe.com/aFa6oIblrcIPaNN3Wq4AU00) |
 
 </div>
 
