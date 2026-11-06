@@ -14,7 +14,7 @@
 
 # Ordering & Availability
 * **Product:** Asgard PCB: ESP32-S3 Development Sub-assembly + **50cm** Connector cable (Odin enclosure optional)
-* **Price:** From € 65,- (including VAT)
+* **Price:** From € 69,50 (including VAT)
 * **Delivery:** Shipped within 3 business days from The Netherlands (When in stock)
 
 > **New to ODIN?** Read the [ODIN whitepaper](https://gekkekoe.github.io/heatpump-optimizer/) first — what it does and a payback calculator — before ordering the bundle below.
@@ -28,7 +28,7 @@
 
 | Standard Order (NL) |
 | :--- |
-| [![Order Standard](https://img.shields.io/badge/Order-Standard%20Order-0070BA?style=for-the-badge&logo=stripe&logoColor=white)](https://buy.stripe.com/aFa6oIblrcIPaNN3Wq4AU00) |
+| [![Order Standard](https://img.shields.io/badge/Order-Standard%20Order-0070BA?style=for-the-badge&logo=stripe&logoColor=white)](https://buy.stripe.com/bJe4gAgFL5gn7BBakO4AU07) |
 
 </div>
 
@@ -77,10 +77,8 @@ To get started, complete the physical hardware installation, then choose your pr
 
 | Step | User Path | Guide |
 | :--- | :--- | :--- |
-| **1. Hardware** | All Users | [![Hardware Setup](https://img.shields.io/badge/Hardware_Setup-333333?style=for-the-badge&logo=arduino&logoColor=white)](./manual.md) |
+| **1. Getting Started** | All Users | [![Getting Started](https://img.shields.io/badge/Getting_Started_Guide-333333?style=for-the-badge&logo=arduino&logoColor=white)](./manual.md) |
 | **2. Software** | Home Assistant | [![HA Setup](https://img.shields.io/badge/Home_Assistant-41BDF5?style=for-the-badge&logo=home-assistant&logoColor=white)](./ha-config.md) |
-| | Standalone (Quick AA Setup) | [![AA Wizard](https://img.shields.io/badge/Auto_Adaptive_Wizard-8A2BE2?style=for-the-badge&logo=smartthings&logoColor=white)](./sa-wizard.md) |
-| | Standalone (Full Config) | [![Standalone Setup](https://img.shields.io/badge/Standalone_Full_Config-02569B?style=for-the-badge&logo=espressif&logoColor=white)](./sa-config.md) |
 
 ---
 

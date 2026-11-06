@@ -29,12 +29,11 @@ globals:
     restore_value: yes
     initial_value: 'false'
 
-  # DHW trigger: remembers whether WE turned Server Control on, so we only
-  # restore it to off if it wasn't already on for some other reason.
-  - id: dhw_trigger_scm_was_off
-    type: bool
+  # DHW trigger: store state prior to dhw trigger
+  - id: scm_flag_before_trigger
+    type: uint8_t
     restore_value: no
-    initial_value: 'false'
+    initial_value: '0'
 
 ####################
 # heatpump commands
@@ -54,6 +53,21 @@ climate:
       current_temp_func: |-
         return id(ecodan_instance).get_status().get_tank_temperature();
 
+button:
+  - platform: template
+    name: ${heatpump_button_regular_dhw}
+    id: heatpump_button_regular_dhw
+    icon: "mdi:water-boiler-auto"
+    on_press:
+      - script.execute: trigger_dhw_script
+
+  - platform: template
+    name: ${heatpump_button_force_dhw}
+    id: heatpump_button_force_dhw
+    on_press:
+      - lambda: |-
+          id(ecodan_instance).set_dhw_force(true);
+
 switch:
   - platform: template
     name: UART Logging
@@ -64,30 +78,6 @@ switch:
       - logger.set_level: VERBOSE
     turn_off_action:
       - logger.set_level: ERROR
-
-  - platform: template
-    name: ${heatpump_switch_regular_dhw}
-    id: heatpump_switch_regular_dhw
-    optimistic: true
-    # This is a trigger, not a persistent state: never restore it ON after a
-    # reboot — the trigger script does not resume, so a restored ON would
-    # look like a stuck switch (same convention as the force DHW switch).
-    restore_mode: DISABLED
-    icon: "mdi:water-boiler-auto"
-    turn_on_action:
-      - script.execute: trigger_dhw_script
-
-  - platform: template
-    name: ${heatpump_switch_force_dhw}
-    id: heatpump_switch_force_dhw
-    restore_mode: DISABLED
-    optimistic: true
-    turn_on_action:
-      - lambda: |-
-         id(ecodan_instance).set_dhw_force(true);
-    turn_off_action:
-      - lambda: |-
-         id(ecodan_instance).set_dhw_force(false);
 
   - platform: template
     name: ${heatpump_switch_holiday}
@@ -457,6 +447,7 @@ sensor:
           }
 
           if (controller_day != last_day_of_year) {
+            ESP_LOGI("ecodan.trace", "day key %d -> %d, first observer", last_day_of_year, controller_day);
             last_day_of_year = controller_day;
             partial_sum = 0.0f;
             last_value = x;
@@ -493,7 +484,7 @@ sensor:
       }
 
       production += status.ComputedOutputPower * 10.0 / (60.0*60.0);
-      //ESP_LOGE("ecodan.component", "last: %f, production: %f, raw: %f", last_input_value, production, status.ComputedOutputPower);
+      //ESP_LOGE("ecodan.trace", "last: %f, production: %f, raw: %f", last_input_value, production, status.ComputedOutputPower);
 
       if (last_input_value == 0.0f) {
         last_input_value = status.EnergyConsumedIncreasing;
@@ -562,7 +553,7 @@ sensor:
 
       int previous_day = (int)previous_day_float;
       if (controller_day != previous_day) {
-        ESP_LOGD("ecodan.component", "Day transition detected (%d -> %d). Resetting integration sensor.", previous_day, controller_day);        
+        ESP_LOGD("ecodan.trace", "Day transition detected (%d -> %d). Resetting integration sensor.", previous_day, controller_day);        
         id(daily_computed_output_power).reset(); 
       }
       return (float)controller_day;
@@ -607,27 +598,6 @@ binary_sensor:
     status_dhw_forced:
       name: ${status_dhw_forced}
       id: status_dhw_forced
-      trigger_on_initial_state: true
-      on_state:
-        if:
-          condition:
-            and:
-              - binary_sensor.is_off: status_dhw_forced
-              - switch.is_on: heatpump_switch_force_dhw
-          then:
-            - switch.template.publish:
-                id: heatpump_switch_force_dhw
-                state: OFF
-          else:
-            if:
-              condition:
-                and:
-                  - binary_sensor.is_on: status_dhw_forced
-                  - switch.is_off: heatpump_switch_force_dhw
-              then:
-                - switch.template.publish:
-                    id: heatpump_switch_force_dhw
-                    state: ON
     status_power:
       internal: true
       id: status_power
@@ -708,26 +678,11 @@ script:
                 format: "DHW is already running. Skipping script."
                 tag: "asgard"
                 level: INFO
-            - switch.turn_off: heatpump_switch_regular_dhw
             - script.stop: trigger_dhw_script
 
-      # Server Control must be on before any flag can be toggled at all.
-      # Remember whether it was off, so we only restore it.
+      # Save the flags once.
       - lambda: |-
-          id(dhw_trigger_scm_was_off) = !id(ecodan_instance).get_status().ServerControl;
-      - if:
-          condition:
-            lambda: 'return id(dhw_trigger_scm_was_off);'
-          then:
-            - logger.log:
-                format: "DHW trigger: Server Control was off — enabling it."
-                tag: "asgard"
-                level: INFO
-            - switch.turn_on: heatpump_switch_server_control_mode
-            - wait_until:
-                condition:
-                  lambda: 'return id(ecodan_instance).get_status().ServerControl;'
-                timeout: 90s
+          id(scm_flag_before_trigger) = static_cast<uint8_t>(id(ecodan_instance).get_status().get_svc_flags());
 
       # Respect an already-active user prohibit
       - if:
@@ -745,44 +700,36 @@ script:
                 format: "DHW trigger: toggling Prohibit DHW on, then off, to force an immediate start."
                 tag: "asgard"
                 level: INFO
-            - switch.turn_on: heatpump_switch_server_control_prohibit_dhw
+            # combined trigger on: server control | prohibit dhw
+            - lambda: |-
+                auto flag = esphome::ecodan::CONTROLLER_FLAG::SERVER_CONTROL | esphome::ecodan::CONTROLLER_FLAG::PROHIBIT_DHW;
+                id(ecodan_instance).set_controller_mode(flag, true);
+
             - wait_until:
                 condition:
                   lambda: |-
                     auto flags = id(ecodan_instance).get_status().get_svc_flags();
                     return static_cast<uint8_t>(flags & esphome::ecodan::CONTROLLER_FLAG::PROHIBIT_DHW) != 0;
-                timeout: 90s
-            - switch.turn_off: heatpump_switch_server_control_prohibit_dhw
-            - wait_until:
-                condition:
-                  lambda: |-
-                    auto flags = id(ecodan_instance).get_status().get_svc_flags();
-                    return static_cast<uint8_t>(flags & esphome::ecodan::CONTROLLER_FLAG::PROHIBIT_DHW) == 0;
-                timeout: 90s
-            - wait_until:
-                condition:
-                  lambda: 'return id(ecodan_instance).get_status().Operation == esphome::ecodan::Status::OperationMode::DHW_ON;'
-                timeout: 5min
+                timeout: 3min
+            # combined trigger off: server control | prohibit dhw
+            - lambda: |-
+                auto flag = esphome::ecodan::CONTROLLER_FLAG::SERVER_CONTROL | esphome::ecodan::CONTROLLER_FLAG::PROHIBIT_DHW;
+                id(ecodan_instance).set_controller_mode(flag, false);
+
             - logger.log:
-                format: "DHW started."
+                format: "DHW Start CMD issued."
                 tag: "asgard"
                 level: INFO
 
-      # Restore Server Control to off, but only if we were the one who enabled it
-      - if:
-          condition:
-            lambda: 'return id(dhw_trigger_scm_was_off);'
-          then:
-            - logger.log:
-                format: "DHW trigger: restoring Server Control to off."
-                tag: "asgard"
-                level: INFO
-            - switch.turn_off: heatpump_switch_server_control_mode
+      # restore svc flag
+      - lambda: |-
+          auto saved = static_cast<esphome::ecodan::CONTROLLER_FLAG>(id(scm_flag_before_trigger));
+          if (static_cast<uint8_t>(saved) != 0)
+            id(ecodan_instance).set_controller_mode(saved, true);
 
       - logger.log:
-          format: "DHW trigger complete. Turning off switch."
+          format: "DHW trigger complete."
           tag: "asgard"
           level: INFO
-      - switch.turn_off: heatpump_switch_regular_dhw
 
 <<: !include stats.yaml

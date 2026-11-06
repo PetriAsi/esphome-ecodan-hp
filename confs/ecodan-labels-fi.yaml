@@ -24,8 +24,8 @@ substitutions:
   version: ESP-versio
   led_brightness: LEDin kirkkaus
   led_switch: LED
-  heatpump_switch_regular_dhw: Normaali LKV
-  heatpump_switch_force_dhw: Pakota LKV
+  heatpump_button_regular_dhw: Normaali LKV
+  heatpump_button_force_dhw: Pakota LKV
   heatpump_switch_power_mode: Lämpöpumppu
   heatpump_switch_holiday: Lomatoiminto
   wifi_signal_proc: WiFi-signaali %
@@ -175,6 +175,7 @@ substitutions:
   # master thermostats
   master_thermostat: 'Päähuoneen anturi'
 
+<<<<<<< HEAD
   # stats collection
   solver_kwh_meter_feedback_source: "Energiamittarin lähde"
   solver_kwh_meter_option_internal: "Sisäinen energiamittari"
@@ -182,20 +183,27 @@ substitutions:
   solver_dhw_mode: Ratkaisimen käyttövesitila
   solver_dhw_mode_option_regular: Normaali
   solver_dhw_mode_option_forced: Pakotettu
+=======
+
+>>>>>>> upstream/main
 
   asgard_vt_temp_sensor_source: 'Virtuaalisen termostaatin lähde'
 
+<<<<<<< HEAD
   # solver settings
   sw_use_solver: "Ota käyttöön dynaaminen kustannusratkaisija"
   bin_solver_connected: "Ratkaisijan online-tila"
+=======
+  solver_kwh_meter_feedback: "kWh-mittarin palaute"
+  solver_kwh_meter_option_internal: "Sisäinen energiamittari"
+  solver_kwh_meter_feedback_source: "Energiamittarin lähde"
+>>>>>>> upstream/main
   num_raw_heat_produced: "Raaka tuotettu lämpö (kWh)"
   num_raw_elec_consumed: "Raaka kulutettu sähkö (kWh)"
   num_raw_runtime_hours: "Raaka käyntiaika (Tuntia)"
   num_raw_avg_outside_temp: "Raaka keskim. ulkolämpötila (°C)"
   num_raw_avg_room_temp: "Raaka keskim. huonelämpötila (°C)"
   num_raw_delta_room_temp: "Raaka huonelämpötilan delta (°C)"
-  num_battery_soc_kwh: "Akun varaustila (kWh)"
-  num_battery_max_discharge_kw: "Akun maksimipurkaus (kW)"
   num_raw_hl_tm_product: "Raaka HL×TM-tulo"
   num_raw_solar_factor: "Passiivisen aurinkolämmön kerroin"
   num_raw_cool_produced: "Tuotettu jäähdytys (Raaka)"

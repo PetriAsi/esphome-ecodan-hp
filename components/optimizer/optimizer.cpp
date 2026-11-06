@@ -11,8 +11,6 @@ namespace esphome
 
         Optimizer::Optimizer(OptimizerState state) : state_(state) {
 
-            this->odin_mutex_ = xSemaphoreCreateMutex();
-            this->energy_buckets_pref_ = global_preferences->make_preference<EnergyBucketState>(0xEC0D0001);
 
             auto update_if_changed = [this](float &storage, float new_val, auto callback) {
                 if (std::isnan(new_val)) return;
@@ -70,7 +68,24 @@ namespace esphome
                     });
                 });
             }
-            this->restore_energy_buckets_();
+        }
+
+        bool Optimizer::aa_enabled() const {
+            return this->state_.auto_adaptive_control_enabled != nullptr && this->state_.auto_adaptive_control_enabled->state;
+        }
+
+        bool Optimizer::predictive_cycle_enabled() const {
+            return this->state_.predictive_short_cycle_control_enabled != nullptr && this->state_.predictive_short_cycle_control_enabled->state;
+        }
+
+        bool Optimizer::odin_forwarder_takeover_active() const {
+            return this->state_.bin_odin_forwarder_takeover != nullptr && this->state_.bin_odin_forwarder_takeover->state;
+        }
+
+        bool Optimizer::odin_owns_flow_setpoint() const {
+            if (this->odin_forwarder_takeover_active())
+                return true;
+            return this->state_.odin_room_feed != nullptr && this->state_.odin_room_feed->owns_flow_setpoint();
         }
 
     } // namespace optimizer

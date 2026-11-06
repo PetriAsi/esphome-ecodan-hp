@@ -1,4 +1,5 @@
 #include "optimizer.h"
+#include <algorithm>
 
 using std::isnan;
 
@@ -10,20 +11,15 @@ namespace esphome
 
         void Optimizer::predictive_short_cycle_check_for_zone_(const ecodan::Status &status, OptimizerZone zone, bool is_cooling) {
 
-            // base_setpoint != NAN is the single source of truth for "a boost is active".
+            // base_setpoint != NAN is the single source of truth for "a boost is active": only the
+            // stand-alone path holds a target of ours that has to be handed back.
             float &base_setpoint = (zone == OptimizerZone::ZONE_2) ? this->predictive_boost_base_z2_setpoint_ : this->predictive_boost_base_z1_setpoint_;
 
-            if (this->is_system_hands_off(status) || !status.CompressorOn)
+            // A pump-only start (feed water still warm from the previous run) is not a
+            // short-cycle risk, so require a running compressor — the same qualification
+            // the auto-adaptive write path uses.
+            if (this->is_system_hands_off(status) || !this->is_compressor_active(status))
             {
-                // Dropping out of protection: if we had raised the setpoint, put the
-                // original back so a boosted value isn't left stranded on the heat pump.
-                if (!isnan(base_setpoint))
-                {
-                    ESP_LOGD(OPTIMIZER_CYCLE_TAG, "Z%d: protection ended, restoring flow setpoint %.1f°C",
-                        static_cast<uint8_t>(zone), base_setpoint);
-                    this->set_flow_temp(base_setpoint, zone);
-                    base_setpoint = NAN;
-                }
                 return;
             }
 
@@ -37,42 +33,43 @@ namespace esphome
                 return;
             }
 
-            float requested_flow = isnan(base_setpoint) ? live_setpoint : base_setpoint;
+            // An ODIN command supersedes the boost's private base.
+            if (this->odin_owns_flow_setpoint())
+                base_setpoint = NAN;
 
-            float step_limited = this->enforce_step_limit(status, actual_flow, requested_flow, is_cooling);
-            // Boost is happening exactly when this cycle adjusted the setpoint.
-            bool boosting = (step_limited != requested_flow);
+            // if step limited did nothing, then boosting is not needed anymore if it was applied
+            float step_limited = this->enforce_step_limit(status, actual_flow, live_setpoint, is_cooling);
+            bool boosting = (step_limited != live_setpoint);
 
             if (boosting)
             {
                 // Remember the original target once, on the first boost of a run.
                 if (isnan(base_setpoint))
-                    base_setpoint = requested_flow;
+                    base_setpoint = live_setpoint;
                 ESP_LOGD(OPTIMIZER_CYCLE_TAG, "Z%d (%s): step-limit flow %.1f°C -> %.1f°C (actual feed %.1f°C)",
-                    static_cast<uint8_t>(zone), is_cooling ? "cooling" : "heating", requested_flow, step_limited, actual_flow);
+                    static_cast<uint8_t>(zone), is_cooling ? "cooling" : "heating", live_setpoint, step_limited, actual_flow);
             }
             else if (!isnan(base_setpoint))
             {
-                // No longer boosting — restore the original setpoint we were protecting.
-                ESP_LOGD(OPTIMIZER_CYCLE_TAG, "Z%d (%s): boost cleared, restoring flow setpoint %.1f°C",
-                    static_cast<uint8_t>(zone), is_cooling ? "cooling" : "heating", requested_flow);
+                // Back within 1.0°C of the feed: nothing left to raise. The value already applied
+                // stays for the rest of the run; on_compressor_stop() puts the original back.
+                ESP_LOGD(OPTIMIZER_CYCLE_TAG, "Z%d (%s): boost no longer needed (feed %.1f°C), holding until the run ends (original %.1f°C)",
+                    static_cast<uint8_t>(zone), is_cooling ? "cooling" : "heating", actual_flow, base_setpoint);
             }
 
-            auto limits = is_cooling ? this->get_cool_flow_limits(zone) : this->get_flow_limits(zone);
-            step_limited = this->clamp_flow_temp(step_limited, limits.min, limits.max);
+            // Inside a post-DHW window the flow limits are not enforced
+            if (is_cooling || !this->is_post_dhw_window(status))
+            {
+                auto limits = is_cooling ? this->get_cool_flow_limits(zone) : this->get_flow_limits(zone);
+                step_limited = this->clamp_flow_temp(step_limited, limits.min, limits.max);
+            }
             this->set_flow_temp(step_limited, zone);
-
-            // step_limited == requested (== base) here when not boosting, so the write above
-            // already restored the original; drop the base so the next run starts fresh.
-            if (!boosting)
-                base_setpoint = NAN;
         }
 
         void Optimizer::clear_predictive_boost_(OptimizerZone zone, bool restore)
         {
             float &base_setpoint = (zone == OptimizerZone::ZONE_2) ? this->predictive_boost_base_z2_setpoint_ : this->predictive_boost_base_z1_setpoint_;
 
-            // If asked, and we had raised the setpoint, put the original back before letting go.
             if (restore && !isnan(base_setpoint))
             {
                 ESP_LOGD(OPTIMIZER_CYCLE_TAG, "Z%d: predictive released, restoring flow setpoint %.1f°C",
@@ -102,7 +99,7 @@ namespace esphome
                 return;
             }
 
-            if (!this->state_.predictive_short_cycle_control_enabled->state)
+            if (!this->predictive_cycle_enabled() && !this->aa_enabled())
             {
                 // Feature turned off — undo any boost we still have applied.
                 this->clear_predictive_boost_(OptimizerZone::ZONE_1, true);
@@ -111,40 +108,18 @@ namespace esphome
                 return;
             }
 
-            auto multizone_status = status.MultiZoneStatus;
-            bool multizone_z1_active = status.has_2zones() && (multizone_status == 1 || multizone_status == 2);
-            bool multizone_z2_active = status.has_2zones() && (multizone_status == 1 || multizone_status == 3);
-
-            bool is_heating_z1 = status.is_auto_adaptive_heating(esphome::ecodan::Zone::ZONE_1) || status.is_heating(esphome::ecodan::Zone::ZONE_1);
-            bool is_cooling_z1 = status.has_cooling()
-                && (status.is_auto_adaptive_cooling(esphome::ecodan::Zone::ZONE_1) || status.is_cooling(esphome::ecodan::Zone::ZONE_1));
-
-            if (multizone_z1_active) {
-                is_heating_z1 = this->is_heating_active(status);
-                is_cooling_z1 = this->is_cooling_active(status);
-            }
-
-            if (is_heating_z1)
+            if (status.is_heating_active(esphome::ecodan::Zone::ZONE_1))
                 this->predictive_short_cycle_check_for_zone_(status, OptimizerZone::ZONE_1, false);
-            else if (is_cooling_z1)
+            else if (status.is_cooling_active(esphome::ecodan::Zone::ZONE_1))
                 this->predictive_short_cycle_check_for_zone_(status, OptimizerZone::ZONE_1, true);
             else
                 this->clear_predictive_boost_(OptimizerZone::ZONE_1, true); // zone idle → restore + release
 
             if (status.has_2zones())
             {
-                bool is_heating_z2 = status.is_auto_adaptive_heating(esphome::ecodan::Zone::ZONE_2) || status.is_heating(esphome::ecodan::Zone::ZONE_2);
-                bool is_cooling_z2 = status.has_cooling()
-                    && (status.is_auto_adaptive_cooling(esphome::ecodan::Zone::ZONE_2) || status.is_cooling(esphome::ecodan::Zone::ZONE_2));
-
-                if (multizone_z2_active) {
-                    is_heating_z2 = this->is_heating_active(status);
-                    is_cooling_z2 = this->is_cooling_active(status);
-                }
-
-                if (is_heating_z2)
+                if (status.is_heating_active(esphome::ecodan::Zone::ZONE_2))
                     this->predictive_short_cycle_check_for_zone_(status, OptimizerZone::ZONE_2, false);
-                else if (is_cooling_z2)
+                else if (status.is_cooling_active(esphome::ecodan::Zone::ZONE_2))
                     this->predictive_short_cycle_check_for_zone_(status, OptimizerZone::ZONE_2, true);
                 else
                     this->clear_predictive_boost_(OptimizerZone::ZONE_2, true);

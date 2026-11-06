@@ -80,6 +80,7 @@ packages:
             # confs/ecodan-labels-sv.yaml,  # Swedish
             # confs/ecodan-labels-da.yaml,  # Danish
             # confs/ecodan-labels-pl.yaml,  # Polish
+            # confs/ecodan-labels-sl.yaml,  # Slovenian
             confs/debug.yaml,
             confs/wifi.yaml,
             confs/led.yaml,
@@ -90,6 +91,7 @@ logger:
   baud_rate: 115200
   logs:
     ecodan.component: WARN
+    ecodan.trace: DEBUG
     auto_adaptive: DEBUG
     short_cycle: DEBUG
 

@@ -21,6 +21,11 @@
 #include "freertos/queue.h" 
 #include "freertos/semphr.h"
 
+#if defined(USE_MDNS) && defined(USE_ESP32)
+#include <cstring>
+#include <mdns.h>
+#endif
+
 #include "proto.h"
 #include "status.h"
 
@@ -92,6 +97,16 @@ namespace ecodan
         void set_polling_interval(uint32_t ms) { this->set_update_interval(ms); }
         void set_uart_parent(uart::UARTComponent *uart) { this->uart_ = uart; }
         void set_proxy_uart(uart::UARTComponent *uart) { this->proxy_uart_ = uart; }
+        void set_dallas_zone_feed_temperature(esphome::ecodan::Zone zone, float value) {
+            if (zone == esphome::ecodan::Zone::ZONE_2) status.Z2DallasFeedTemperature = value;
+            else status.Z1DallasFeedTemperature = value;
+        }
+        void set_dallas_zone_return_temperature(esphome::ecodan::Zone zone, float value) {
+            if (zone == esphome::ecodan::Zone::ZONE_2) status.Z2DallasReturnTemperature = value;
+            else status.Z1DallasReturnTemperature = value;
+        }
+        void set_dallas_hp_feed_temperature(float value) { status.HpDallasFeedTemperature = value; }
+        void set_dallas_hp_return_temperature(float value) { status.HpDallasReturnTemperature = value; }
         const Status& get_status() const { return status; }
         std::optional<CONTROLLER_FLAG> get_svc_state_before_lockout() { return serverControlFlagBeforeLockout; }
 

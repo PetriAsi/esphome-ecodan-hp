@@ -36,10 +36,20 @@ namespace ecodan
         float OutsideTemperature{NAN};
         float HpFeedTemperature{NAN};
         float HpReturnTemperature{NAN};
+
+        float HpDallasFeedTemperature{NAN};
+        float HpDallasReturnTemperature{NAN};
         float Z1FeedTemperature{NAN};
         float Z1ReturnTemperature{NAN};
         float Z2FeedTemperature{NAN};
         float Z2ReturnTemperature{NAN};
+        // Zone temperatures measured outside the heat pump: a DS18x20 probe mapped
+        // to a zone's feed / return role on the Misc tab. NAN while nothing is
+        // mapped; while set they win over the bus values above.
+        float Z1DallasFeedTemperature{NAN};
+        float Z1DallasReturnTemperature{NAN};
+        float Z2DallasFeedTemperature{NAN};
+        float Z2DallasReturnTemperature{NAN};
         float MixingTankTemperature{NAN};
         float HpRefrigerantLiquidTemperature;
         float HpRefrigerantCondensingTemperature;
@@ -56,8 +66,8 @@ namespace ecodan
         uint8_t PumpPWM;
         uint8_t PumpFeedback;
         
-        bool WaterPump2Active;
-        bool WaterPump3Active;
+        bool WaterPump2Active{false};
+        bool WaterPump3Active{false};
         bool WaterPump4Active;
         bool ThreeWayValveActive;
         bool ThreeWayValve2Active;
@@ -221,6 +231,58 @@ namespace ecodan
             return has_mixing_tank() || (IS_BIT_SET(DipSwitch2, 6) && !IS_BIT_SET(DipSwitch3, 5));
         }
 
+        static bool zone_thermistors_fitted(float feed, float ret) {
+            return !std::isnan(feed) && !std::isnan(ret) &&
+                !(feed == 25.0f && ret == 25.0f);
+        }
+
+        static float prefer_measured(float measured, float bus) {
+            return std::isnan(measured) ? bus : measured;
+        }
+
+        float z1_feed_temperature() const { return prefer_measured(Z1DallasFeedTemperature, Z1FeedTemperature); }
+        float z1_return_temperature() const { return prefer_measured(Z1DallasReturnTemperature, Z1ReturnTemperature); }
+        float z2_feed_temperature() const { return prefer_measured(Z2DallasFeedTemperature, Z2FeedTemperature); }
+        float z2_return_temperature() const { return prefer_measured(Z2DallasReturnTemperature, Z2ReturnTemperature); }
+
+        float primary_feed_temperature() const { return prefer_measured(HpDallasFeedTemperature, HpFeedTemperature); }
+        float primary_return_temperature() const { return prefer_measured(HpDallasReturnTemperature, HpReturnTemperature); }
+
+        // Both ends or neither: a delta subtracts one sensor from the other, so a
+        // single mapped probe must not mix into the bus thermistor's reading.
+        bool has_dallas_hp_temps() const {
+            return !std::isnan(HpDallasFeedTemperature) && !std::isnan(HpDallasReturnTemperature);
+        }
+
+        float zone_feed_temperature(Zone zone) const {
+            return zone == Zone::ZONE_2 ? z2_feed_temperature() : z1_feed_temperature();
+        }
+
+        float zone_return_temperature(Zone zone) const {
+            return zone == Zone::ZONE_2 ? z2_return_temperature() : z1_return_temperature();
+        }
+
+        bool has_dallas_zone_temps(Zone zone) const {
+            return zone == Zone::ZONE_2
+                ? (!std::isnan(Z2DallasFeedTemperature) || !std::isnan(Z2DallasReturnTemperature))
+                : (!std::isnan(Z1DallasFeedTemperature) || !std::isnan(Z1DallasReturnTemperature));
+        }
+
+        bool has_zone1_temps() const {
+            return zone_thermistors_fitted(Z1FeedTemperature, Z1ReturnTemperature);
+        }
+
+        bool has_zone2_temps() const {
+            return zone_thermistors_fitted(Z2FeedTemperature, Z2ReturnTemperature);
+        }
+
+        bool has_zone_temps(Zone zone) const {
+            if (IS_BIT_SET(DipSwitch2, 6) && !IS_BIT_SET(DipSwitch3, 5))
+                return true; // SW2-7: the controller regulates on the zone thermistors itself
+            return has_mixing_tank() &&
+                (zone == Zone::ZONE_2 ? has_zone2_temps() : has_zone1_temps());
+        }
+
         bool has_2zones() const {
             if (IS_BIT_SET(DipSwitch3, 5) && !IS_BIT_SET(DipSwitch2, 6)) // SW3-6 True, SW2-7 False
                 return true; // z1, z2 -> same flow
@@ -309,6 +371,50 @@ namespace ecodan
             return false;
         }
 
+        bool is_heating_active() const {
+            return Operation == esphome::ecodan::Status::OperationMode::HEAT_ON;
+        }
+
+        bool is_heating_active(Zone zone) const {
+
+            bool is_heating_mode = is_auto_adaptive_heating(zone) || is_heating(zone);
+            auto is_heating = is_heating_active();
+
+            if (!is_heating || !is_heating_mode)
+                return false;
+
+            if (has_2zones()) {
+                auto mz_status_active = zone == Zone::ZONE_1 ? 
+                    (MultiZoneStatus == 1 || MultiZoneStatus == 2) : (MultiZoneStatus == 1 || MultiZoneStatus == 3);
+
+                return mz_status_active;
+            }
+
+            return true;
+        }
+
+        bool is_cooling_active() const {
+            return Operation == esphome::ecodan::Status::OperationMode::COOL_ON;
+        }
+
+        bool is_cooling_active(Zone zone) const {
+
+            bool is_cooling_mode = is_auto_adaptive_cooling(zone) || is_cooling(zone);
+            auto is_cooling = is_cooling_active();
+
+            if (!is_cooling || !is_cooling_mode)
+                return false;
+
+            if (has_2zones()) {
+                auto mz_status_active = zone == Zone::ZONE_1 ? 
+                    (MultiZoneStatus == 1 || MultiZoneStatus == 2) : (MultiZoneStatus == 1 || MultiZoneStatus == 3);
+
+                return mz_status_active;
+            }
+
+            return true;
+        }
+
 /* polynomial fit for
 Temp C	specific heat (J/Kg. K)
 0.01	4.212
@@ -328,16 +434,19 @@ Temp C	specific heat (J/Kg. K)
         }
 
         void update_output_power_estimation(float specific_heat_constant_override = NAN) {
-            if (!std::isnan(HpFeedTemperature) && !std::isnan(HpReturnTemperature) && FlowRate > 0) {
-                float specific_heat_constant = std::isnan(specific_heat_constant_override) ? estimate_water_constant(HpFeedTemperature) : specific_heat_constant_override;
+            float feed = has_dallas_hp_temps() ? HpDallasFeedTemperature : HpFeedTemperature;
+            float ret = has_dallas_hp_temps() ? HpDallasReturnTemperature : HpReturnTemperature;
+
+            if (!std::isnan(feed) && !std::isnan(ret) && FlowRate > 0) {
+                float specific_heat_constant = std::isnan(specific_heat_constant_override) ? estimate_water_constant(feed) : specific_heat_constant_override;
 
                 float delta_t = 0.0f;
 
                 if (this->Operation == ecodan::Status::OperationMode::COOL_ON) {
-                    delta_t = HpReturnTemperature - HpFeedTemperature;
-                } 
+                    delta_t = ret - feed;
+                }
                 else {
-                    delta_t = HpFeedTemperature - HpReturnTemperature;
+                    delta_t = feed - ret;
                 }
 
                 if (delta_t < 0.0f)
