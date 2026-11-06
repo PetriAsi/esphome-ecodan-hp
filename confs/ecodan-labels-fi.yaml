@@ -174,30 +174,11 @@ substitutions:
 
   # master thermostats
   master_thermostat: 'Päähuoneen anturi'
-
-<<<<<<< HEAD
-  # stats collection
-  solver_kwh_meter_feedback_source: "Energiamittarin lähde"
-  solver_kwh_meter_option_internal: "Sisäinen energiamittari"
-  solver_kwh_meter_feedback: "kWh-mittari"
-  solver_dhw_mode: Ratkaisimen käyttövesitila
-  solver_dhw_mode_option_regular: Normaali
-  solver_dhw_mode_option_forced: Pakotettu
-=======
-
->>>>>>> upstream/main
-
   asgard_vt_temp_sensor_source: 'Virtuaalisen termostaatin lähde'
 
-<<<<<<< HEAD
-  # solver settings
-  sw_use_solver: "Ota käyttöön dynaaminen kustannusratkaisija"
-  bin_solver_connected: "Ratkaisijan online-tila"
-=======
   solver_kwh_meter_feedback: "kWh-mittarin palaute"
   solver_kwh_meter_option_internal: "Sisäinen energiamittari"
   solver_kwh_meter_feedback_source: "Energiamittarin lähde"
->>>>>>> upstream/main
   num_raw_heat_produced: "Raaka tuotettu lämpö (kWh)"
   num_raw_elec_consumed: "Raaka kulutettu sähkö (kWh)"
   num_raw_runtime_hours: "Raaka käyntiaika (Tuntia)"
